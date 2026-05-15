@@ -1,0 +1,62 @@
+images:
+  airflow:
+    repository: custom-airflow
+    tag: latest
+    pullPolicy: Never  # use local minikube image, don't pull from registry
+
+scheduler:
+  extraVolumes:
+    - name: dags
+      hostPath:
+        path: /mnt/dags
+        type: DirectoryOrCreate
+    - name: output
+      hostPath:
+        path: /mnt/output
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: dags
+      mountPath: /opt/airflow/dags
+      readOnly: true
+    - name: output
+      mountPath: /opt/airflow/output
+
+dagProcessor:
+  enabled: true
+  extraVolumes:
+    - name: dags
+      hostPath:
+        path: /mnt/dags
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: dags
+      mountPath: /opt/airflow/dags
+      readOnly: true
+
+apiServer:
+  extraVolumes:
+    - name: dags
+      hostPath:
+        path: /mnt/dags
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: dags
+      mountPath: /opt/airflow/dags
+      readOnly: true
+
+workers:
+  extraVolumes:
+    - name: dags
+      hostPath:
+        path: /mnt/dags
+        type: DirectoryOrCreate
+    - name: output
+      hostPath:
+        path: /mnt/output
+        type: DirectoryOrCreate
+  extraVolumeMounts:
+    - name: dags
+      mountPath: /opt/airflow/dags
+      readOnly: true
+    - name: output
+      mountPath: /opt/airflow/output
