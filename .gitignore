@@ -17,10 +17,10 @@ build/
 *.duckdb
 *.duckdb.wal
 
-# dbt
-dbt/target/
-dbt/dbt_packages/
-dbt/logs/
+# dbt (cinemetrics project)
+cinemetrics/target/
+cinemetrics/dbt_packages/
+cinemetrics/logs/
 
 # Environment
 .env
@@ -40,4 +40,9 @@ Thumbs.db
 .scrapy/
 httpcache/
 
+# Claude Code
 .context/
+
+# Leftovers from old Delta Lake setup
+mc_scrape/delta/
+logs/
