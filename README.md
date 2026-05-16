@@ -1,1 +1,89 @@
 # movies-elt-pipeline
+
+Local ELT pipeline that scrapes movie data from **Rotten Tomatoes** and **Metacritic**, loads raw JSON into **DuckDB**, and transforms it with **dbt**. Orchestrated by Apache Airflow running in Docker Compose.
+
+## Architecture
+
+```
+Rotten Tomatoes  ──► Scrapy spider  ──┐
+                                       ├──► JSON files ──► DuckDB (raw) ──► dbt (silver/gold)
+Metacritic       ──► Python scraper ──┘
+
+Orchestration: Airflow 3.2.1 · LocalExecutor · Docker Compose
+```
+
+| Layer | Tool |
+|---|---|
+| Extraction | Scrapy (RT) · `mc-scrape` Python package (Metacritic) |
+| Orchestration | Apache Airflow 3.2.1 (LocalExecutor) |
+| Raw storage | JSON files on disk + DuckDB `raw` schema |
+| Transformation | dbt Core with `dbt-duckdb` *(planned)* |
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) + Docker Compose
+- [uv](https://docs.astral.sh/uv/) *(optional — for querying DuckDB locally)*
+- [DuckDB CLI](https://duckdb.org/docs/installation/) *(optional — for querying DuckDB locally)*
+
+## Running
+
+```bash
+# Start everything (builds image on first run)
+docker compose up --build -d
+
+# Airflow UI → http://localhost:8080
+# Default credentials: airflow / airflow
+```
+
+## Querying the data
+
+Scraped data lands in `data/warehouse.duckdb`. Query it with the DuckDB CLI:
+
+```bash
+duckdb data/warehouse.duckdb
+```
+
+```sql
+-- Open the browser UI (http://localhost:4213)
+CALL start_ui();
+
+SHOW ALL TABLES;
+
+-- Raw records
+SELECT _source_file, _loaded_at FROM raw.rt_reviews LIMIT 5;
+
+-- Extract fields from JSON
+SELECT
+    json_extract_string(record, '$.movie_id') AS movie,
+    json_extract_string(record, '$.quote')    AS quote
+FROM raw.rt_reviews,
+LATERAL (SELECT unnest(data::JSON[])) t(record)
+LIMIT 10;
+```
+
+## Project structure
+
+```
+.
+├── airflow/
+│   ├── Dockerfile          # Airflow image with scrapers baked in
+│   ├── dags/
+│   │   ├── rt_scraper_dag.py
+│   │   └── mc_scraper_dag.py
+│   └── sql/
+│       └── init_warehouse.sql
+├── rottentomatoes_spider/  # Scrapy project for Rotten Tomatoes
+├── mc_scrape/              # Python package for Metacritic
+├── data/                   # Runtime data (gitignored)
+│   └── warehouse.duckdb
+└── docker-compose.yml
+```
+
+## DAGs
+
+| DAG | Schedule | Description |
+|---|---|---|
+| `rt_scraper` | daily | Discovers movies in theaters, then scrapes score, details, and reviews for each |
+| `mc_scraper` | daily | Browses Metacritic catalog, then scrapes general info and critic/user reviews |
+
+Raw data is loaded into DuckDB under the `raw` schema with three columns: `_loaded_at`, `_source_file`, and `data` (full JSON).
