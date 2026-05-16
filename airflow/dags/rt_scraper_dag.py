@@ -6,10 +6,13 @@ from datetime import datetime
 
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
+from airflow.sdk import Asset
 
 _DATA = "/opt/airflow/data"
 _SCRAPERS = "/opt/scrapers/rottentomatoes_spider"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
+
+RT_RAW_ASSET = Asset("rt_raw_loaded")
 
 
 @dag(
@@ -43,40 +46,41 @@ def rt_scraper_dag():
             for slug in slugs
         ]
 
-    @task
-    def load_raw_to_duckdb(action: str) -> None:
+    @task(outlets=[RT_RAW_ASSET], pool="duckdb")
+    def load_all_raw_to_duckdb() -> None:
         import duckdb
-
-        files = glob.glob(f"{_DATA}/rt/{action}/*.json")
-        if not files:
-            return
 
         con = duckdb.connect(_WAREHOUSE)
         con.execute("CREATE SCHEMA IF NOT EXISTS raw")
-        con.execute(f"""
-            CREATE TABLE IF NOT EXISTS raw.rt_{action} (
-                _loaded_at TIMESTAMP,
-                _source_file VARCHAR,
-                data JSON
-            )
-        """)
-        for fp in files:
-            with open(fp, errors="replace") as f:
-                raw = f.read()
-            try:
-                content = json.dumps(json.loads(raw))
-            except json.JSONDecodeError as e:
-                print(f"Skipping malformed file {fp}: {e}")
-                continue
-            con.execute(
-                f"INSERT INTO raw.rt_{action} (_loaded_at, _source_file, data) VALUES (current_timestamp, ?, ?)",
-                [fp, content],
-            )
+
+        for action in ["score", "details", "reviews"]:
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS raw.rt_{action} (
+                    _loaded_at TIMESTAMP,
+                    _source_file VARCHAR,
+                    data JSON
+                )
+            """)
+            for fp in glob.glob(f"{_DATA}/rt/{action}/*.json"):
+                with open(fp, errors="replace") as f:
+                    raw = f.read()
+                try:
+                    content = json.dumps(json.loads(raw))
+                except json.JSONDecodeError as e:
+                    print(f"Skipping malformed file {fp}: {e}")
+                    continue
+                con.execute(
+                    f"INSERT INTO raw.rt_{action} (_loaded_at, _source_file, data) "
+                    "VALUES (current_timestamp, ?, ?)",
+                    [fp, content],
+                )
+
         con.close()
 
     slugs = get_films()
     discover_films >> slugs
 
+    scrapes = []
     for action in ["score", "details", "reviews"]:
         commands = build_commands(slugs=slugs, action=action)
         scrape = BashOperator.partial(
@@ -85,7 +89,10 @@ def rt_scraper_dag():
             env={"FEED_URI": f"{_DATA}/rt/{action}/%(name)s_%(time)s.json"},
             append_env=True,
         ).expand(bash_command=commands)
-        load = load_raw_to_duckdb.override(task_id=f"load_{action}_to_duckdb")(action=action)
+        scrapes.append(scrape)
+
+    load = load_all_raw_to_duckdb()
+    for scrape in scrapes:
         scrape >> load
 
 

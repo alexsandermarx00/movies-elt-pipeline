@@ -7,10 +7,13 @@ from pathlib import Path
 
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
+from airflow.sdk import Asset
 
 _DATA = "/opt/airflow/data"
 _MC_FEED = f"{_DATA}/mc"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
+
+MC_RAW_ASSET = Asset("mc_raw_loaded")
 
 
 @dag(
@@ -47,7 +50,7 @@ def mc_scraper_dag():
     def build_scrape_commands(slugs: list[str]) -> list[str]:
         return [f"python -m metacritic movie {slug} all" for slug in slugs]
 
-    @task
+    @task(outlets=[MC_RAW_ASSET], pool="duckdb")
     def load_raw_to_duckdb() -> None:
         import duckdb
 

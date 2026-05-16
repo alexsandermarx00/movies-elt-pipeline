@@ -46,3 +46,4 @@ httpcache/
 # Leftovers from old Delta Lake setup
 mc_scrape/delta/
 logs/
+.user.yml
