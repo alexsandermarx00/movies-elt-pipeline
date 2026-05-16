@@ -24,12 +24,6 @@ CREATE TABLE IF NOT EXISTS raw.rt_reviews (
     data JSON
 );
 
-CREATE TABLE IF NOT EXISTS raw.mc_discovered (
-    _loaded_at TIMESTAMP,
-    _source_file VARCHAR,
-    data JSON
-);
-
 CREATE TABLE IF NOT EXISTS raw.mc_general (
     _loaded_at TIMESTAMP,
     _source_file VARCHAR,

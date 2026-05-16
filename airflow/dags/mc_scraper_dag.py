@@ -25,7 +25,7 @@ def mc_scraper_dag():
 
     discover_movies = BashOperator(
         task_id="discover_movies",
-        bash_command="python -m metacritic browse --max-items 50",
+        bash_command="python -m metacritic browse --max-items 500",
         env={"FEED_URI": _MC_FEED},
         append_env=True,
     )
@@ -55,7 +55,6 @@ def mc_scraper_dag():
         con.execute("CREATE SCHEMA IF NOT EXISTS raw")
 
         for table, subdir in [
-            ("mc_discovered", "discovered_movies"),
             ("mc_general", "general"),
             ("mc_critic_reviews", "critic_reviews"),
             ("mc_user_reviews", "user_reviews"),

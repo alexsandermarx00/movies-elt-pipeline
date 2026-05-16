@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: rt_details
+      - name: rt_score
+      - name: rt_reviews
+      - name: mc_general
+      - name: mc_critic_reviews
+      - name: mc_user_reviews
