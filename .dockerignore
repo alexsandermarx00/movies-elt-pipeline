@@ -1,0 +1,16 @@
+.git
+.claude
+data/
+airflow/logs/
+base_infrastructure/
+
+# Python artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+**/.venv_dw
+
+# mc_scrape runtime data
+mc_scrape/delta/
+mc_scrape/uv.lock
