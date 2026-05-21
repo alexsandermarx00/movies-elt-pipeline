@@ -1,6 +1,6 @@
 
 with source as (
-    select * from {{ source('raw', 'mc_critic_reviews') }}
+    select * from {{ source('bronze', 'mc_critic_reviews') }}
 ),
 
 unnested as (
@@ -25,3 +25,7 @@ select
     _source_file
 from unnested
 where json_extract_string(record, '$.movie_slug') is not null
+qualify row_number() over (
+    partition by movie_slug, author_slug, review_date
+    order by _loaded_at desc
+) = 1

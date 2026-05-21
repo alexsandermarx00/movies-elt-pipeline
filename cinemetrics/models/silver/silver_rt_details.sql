@@ -1,6 +1,6 @@
 
 with source as (
-    select * from {{ source('raw', 'rt_details') }}
+    select * from {{ source('bronze', 'rt_details') }}
 ),
 
 unnested as (
@@ -22,3 +22,4 @@ select
     _source_file
 from unnested
 where json_extract_string(record, '$.movie_id') is not null
+qualify row_number() over (partition by movie_id order by _loaded_at desc) = 1

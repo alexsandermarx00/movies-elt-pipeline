@@ -51,11 +51,11 @@ def rt_scraper_dag():
         import duckdb
 
         con = duckdb.connect(_WAREHOUSE)
-        con.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
 
         for action in ["score", "details", "reviews"]:
             con.execute(f"""
-                CREATE TABLE IF NOT EXISTS raw.rt_{action} (
+                CREATE TABLE IF NOT EXISTS bronze.rt_{action} (
                     _loaded_at TIMESTAMP,
                     _source_file VARCHAR,
                     data JSON
@@ -70,7 +70,7 @@ def rt_scraper_dag():
                     print(f"Skipping malformed file {fp}: {e}")
                     continue
                 con.execute(
-                    f"INSERT INTO raw.rt_{action} (_loaded_at, _source_file, data) "
+                    f"INSERT INTO bronze.rt_{action} (_loaded_at, _source_file, data) "
                     "VALUES (current_timestamp, ?, ?)",
                     [fp, content],
                 )

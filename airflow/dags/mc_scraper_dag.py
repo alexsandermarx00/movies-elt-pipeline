@@ -55,7 +55,7 @@ def mc_scraper_dag():
         import duckdb
 
         con = duckdb.connect(_WAREHOUSE)
-        con.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
 
         for table, subdir in [
             ("mc_general", "general"),
@@ -63,7 +63,7 @@ def mc_scraper_dag():
             ("mc_user_reviews", "user_reviews"),
         ]:
             con.execute(f"""
-                CREATE TABLE IF NOT EXISTS raw.{table} (
+                CREATE TABLE IF NOT EXISTS bronze.{table} (
                     _loaded_at TIMESTAMP,
                     _source_file VARCHAR,
                     data JSON
@@ -78,7 +78,7 @@ def mc_scraper_dag():
                     print(f"Skipping malformed file {fp}: {e}")
                     continue
                 con.execute(
-                    f"INSERT INTO raw.{table} (_loaded_at, _source_file, data) VALUES (current_timestamp, ?, ?)",
+                    f"INSERT INTO bronze.{table} (_loaded_at, _source_file, data) VALUES (current_timestamp, ?, ?)",
                     [fp, content],
                 )
 
