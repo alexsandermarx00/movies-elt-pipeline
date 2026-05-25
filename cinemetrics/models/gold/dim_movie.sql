@@ -1,33 +1,35 @@
 with mc as (
     select
-        movie_slug                                  as mc_slug,
+        movie_slug                                          as mc_slug,
         title,
-        premiere_year                               as release_year,
+        premiere_year                                       as release_year,
         rating,
         duration_minutes,
         imdb_id,
-        json_extract_string(genres, '$[0]')         as primary_genre
+        json_extract_string(genres, '$[0]')                 as primary_genre
     from {{ ref('silver_mc_general') }}
 ),
 rt as (
     select
-        movie_id                                    as rt_movie_id,
-        title,
+        movie_id                                            as rt_movie_id,
+        -- Strip trailing year disambiguation suffix added by RT, e.g. "Magic Hour (2025)" → "Magic Hour"
+        trim(regexp_replace(title, '\s*\(\d{4}\)\s*$', '')) as title,
         coalesce(
+            -- RT release_date format is "May 8, 2026" — try_cast to integer/date both fail
             try_cast(release_date as integer),
             year(try_strptime(release_date, '%b %d, %Y')),
             year(try_cast(release_date as date))
-        )                                           as release_year,
-        urlid                                       as rt_urlid
+        )                                                   as release_year,
+        urlid                                               as rt_urlid
     from {{ ref('silver_rt_details') }}
 ),
 joined as (
     select
-        coalesce(mc.mc_slug, rt.rt_movie_id)        as movie_natural_key,
+        coalesce(mc.mc_slug, rt.rt_movie_id)                as movie_natural_key,
         mc.mc_slug,
         rt.rt_movie_id,
-        coalesce(mc.title, rt.title)                as title,
-        coalesce(mc.release_year, rt.release_year)  as release_year,
+        coalesce(mc.title, rt.title)                        as title,
+        coalesce(mc.release_year, rt.release_year)          as release_year,
         mc.rating,
         mc.duration_minutes,
         mc.imdb_id,
@@ -36,10 +38,11 @@ joined as (
     from mc
     full outer join rt
         on lower(trim(mc.title)) = lower(trim(rt.title))
-        and mc.release_year = rt.release_year
+        -- ±1 year tolerance: MC stores festival premiere year, RT stores wide release year
+        and abs(mc.release_year - rt.release_year) <= 1
 )
 select
-    row_number() over (order by title, release_year)    as movie_key,
+    row_number() over (order by title, release_year)        as movie_key,
     movie_natural_key,
     mc_slug,
     rt_movie_id,

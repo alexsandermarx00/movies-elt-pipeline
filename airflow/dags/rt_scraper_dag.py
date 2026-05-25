@@ -27,7 +27,7 @@ def rt_scraper_dag():
 
     discover_films = BashOperator(
         task_id="discover_films",
-        bash_command="scrapy crawl rt_discovery_spider -a browse_url=movies_in_theaters",
+        bash_command="scrapy crawl rt_discovery_spider -a browse_url=movies_at_home",
         cwd=_SCRAPERS,
         env={"FEED_URI": f"{_DATA}/rt/discovery.json"},
         append_env=True,
