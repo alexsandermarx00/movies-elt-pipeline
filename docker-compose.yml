@@ -54,6 +54,7 @@ services:
         mkdir -p /opt/airflow/{logs,dags,plugins,config}
         mkdir -p /opt/airflow/data/{rt,mc}
         chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/
+        airflow pools set duckdb 2 "Pool for duckdb tasks"
         exec /entrypoint airflow version
     environment:
       <<: *airflow-common-env

@@ -33,6 +33,10 @@ models:
       Unmatched records from either platform are retained via FULL OUTER JOIN, so
       mc_slug or rt_movie_id may be NULL. Primary genre is the first element of the
       Metacritic genres JSON array; multi-genre modelling is deferred to future work.
+    tests:
+      - dbt_expectations.expect_table_row_count_to_be_between:
+          min_value: 100
+          max_value: 1000000
     columns:
       - name: movie_key
         description: Surrogate key.

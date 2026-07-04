@@ -29,7 +29,7 @@ scrapy crawl rtspider -a movie=<movie_name_slug> -a action=<extraction_mode> [op
 
 ## Extraction Modes (`action`)
 
-The spider supports three distinct modes of data extraction.
+The spider supports four distinct modes of data extraction.
 
 ### 1. `score`
 Pulls high-level rating and synopsis information.
@@ -58,27 +58,23 @@ Pulls technical details from the underlying page metadata integration.
 scrapy crawl rtspider -a movie=dune_part_two -a action=details
 ```
 
+### 4. `critic_reviews`
+Pulls and paginates through critic reviews for the specified movie.
+**Extracted Data:** Movie ID, review ID, critic name, publication, score, quote, review date.
+
+**Execution Example:**
+```bash
+scrapy crawl rtspider -a movie=dune_part_two -a action=critic_reviews -a max_pages=5
+```
+
 ---
 
-## Docker Orchestration
+## Discovery via Wikidata Crosswalk
 
-This project includes a production-ready `Dockerfile` structured to separate the `ENTRYPOINT` context from dynamically overridable parameter `CMD`s, making it perfectly suited for Apache Airflow `DockerOperator` usage.
+Previously, this project included `rt_discovery_spider.py` for dynamic movie discovery. This has been replaced by a Wikidata crosswalk mapping (IMDB ID → RT URL Slug), bridging records directly and deterministically into our pipeline without requiring exploratory scraping.
 
-### 1. Build the Image
-Build the Docker container locally using the provided `.dockerignore` to streamline the build cache:
-```bash
-docker build -t rtspider-image .
-```
+---
 
-### 2. Execute a Crawl Test
-Run the container to test execution. Since the `ENTRYPOINT` natively wraps `scrapy crawl`, simply pass your dynamic spider parameters directly as trailing arguments.
+## Orchestration
 
-To route outputs strictly to an S3 bucket instead of the ephemeral container filesystem, inject the `FEED_URI` environment variable natively into the container:
-```bash
-docker run --rm -e FEED_URI="s3://my-datalake/rottentomatoes/%(action)s/%(name)s_%(time)s.json" rtspider-image rtspider -a movie=dune_part_two -a action=score
-```
-
-Alternatively, if you want to test locally and save the output directly to your host machine without using S3, you must map a volume from your local `.output/` directory into the container's `/app/.output/` working directory:
-```bash
-docker run --rm -v $(pwd)/.output:/app/.output rtspider-image rtspider -a movie=dune_part_two -a action=score
-```
+The scraper is executed via Apache Airflow. The Dockerfile for execution is located in the root `airflow/` directory. Airflow runs the scrapers as subprocesses (using BashOperator), writing the output as JSON files which are then loaded into DuckDB.

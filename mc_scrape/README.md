@@ -1,6 +1,6 @@
 # mc_scrape
 
-Metacritic scraper that fetches general info, critic reviews, and user reviews for movies, writing output to Delta Lake (local or S3). Supports slug discovery via title search or bulk browse across the full catalog (~17k movies).
+Metacritic scraper that fetches general info, critic reviews, and user reviews for movies, writing output as pure JSON consumed by the bronze layer loader. Supports slug discovery via title search or bulk browse across the full catalog (~17k movies).
 
 ## Requirements
 
@@ -50,7 +50,7 @@ uv run python -m metacritic movie the-godfather all
 
 #### `search` — discover slugs by title query
 
-Searches Metacritic for movies matching a query and writes results to the `browse` Delta table.
+Searches Metacritic for movies matching a query and writes results to the `browse` JSON output.
 
 ```bash
 uv run python -m metacritic search "godfather"
@@ -63,7 +63,7 @@ uv run python -m metacritic search "godfather" --max-items 3
 
 #### `browse` — bulk-discover slugs across the full catalog
 
-Paginates through all ~17k movies on Metacritic with optional filters. Results are written to the `browse` Delta table.
+Paginates through all ~17k movies on Metacritic with optional filters. Results are written to the `browse` JSON output.
 
 ```bash
 uv run python -m metacritic browse [--sort-by SORT] [--year-min YEAR] [--year-max YEAR] [--genre GENRE ...]
@@ -95,22 +95,22 @@ uv run python -m metacritic browse --max-items 100
 
 **Output location:**
 
-By default, Delta tables are written to `./delta/`:
+By default, JSON files are written to `./data/`:
 
 ```
-./delta/
-├── general/              (full movie metadata)
-├── critic_reviews/       (individual critic reviews)
-├── user_reviews/         (individual user reviews)
-└── discovered_movies/    (discovered slugs: slug, discovered_at, method)
+./data/
+├── mc_general/              (full movie metadata)
+├── mc_critic_reviews/       (individual critic reviews)
+├── mc_user_reviews/         (individual user reviews)
+└── mc_discovered_movies/    (discovered slugs)
 ```
 
-The `discovered_movies` table is a lightweight "discovered queue" that tracks:
+The `discovered_movies` file acts as a lightweight "discovered queue" that tracks:
 - `slug` — the movie identifier
 - `discovered_at` — timestamp when discovered
 - `method` — how it was discovered (`browse` or `search`)
 
-For Airflow: use the returned slug list directly for downstream tasks rather than querying the table.
+For Airflow: use the returned slug list directly for downstream tasks.
 
 Set the `FEED_URI` environment variable to write elsewhere:
 
@@ -122,55 +122,24 @@ FEED_URI=/data/metacritic uv run python -m metacritic movie the-godfather all
 FEED_URI=s3://my-bucket/metacritic uv run python -m metacritic browse
 ```
 
-### Docker
-
-**Build:**
-
-```bash
-docker build -t mc_scrape .
-```
-
-**Run:**
-
-```bash
-# Scrape a specific movie
-docker run mc_scrape movie the-godfather all
-
-# Search for slugs
-docker run mc_scrape search "godfather"
-
-# Browse full catalog, write to S3
-docker run \
-  -e FEED_URI=s3://my-bucket/metacritic \
-  -e AWS_ACCESS_KEY_ID=... \
-  -e AWS_SECRET_ACCESS_KEY=... \
-  mc_scrape browse --sort-by -releaseDate
-
-# Write to a local path (mount a volume)
-docker run \
-  -e FEED_URI=/output \
-  -v $(pwd)/delta:/output \
-  mc_scrape movie the-godfather all
-```
-
 ## Reading the output with DuckDB
 
 ```sql
 -- General info
-SELECT * FROM delta_scan('./delta/general');
+SELECT * FROM read_json_auto('./data/mc_general/*.json');
 
 -- Critic reviews
-SELECT * FROM delta_scan('./delta/critic_reviews');
+SELECT * FROM read_json_auto('./data/mc_critic_reviews/*.json');
 
 -- User reviews
-SELECT * FROM delta_scan('./delta/user_reviews');
+SELECT * FROM read_json_auto('./data/mc_user_reviews/*.json');
 
 -- Discovered movies (slug discovery queue)
-SELECT * FROM delta_scan('./delta/discovered_movies');
+SELECT * FROM read_json_auto('./data/mc_discovered_movies/*.json');
 
 -- Example: find all movies discovered via search for "godfather"
 SELECT slug, discovered_at 
-FROM delta_scan('./delta/discovered_movies')
+FROM read_json_auto('./data/mc_discovered_movies/*.json')
 WHERE method = 'search';
 ```
 
