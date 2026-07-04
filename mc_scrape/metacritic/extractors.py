@@ -17,11 +17,13 @@ def iter_general(session: requests.Session, movie: str) -> Generator[GeneralItem
     yield GeneralItem.from_api(movie, item)
 
 
-def iter_critic_reviews(session: requests.Session, movie: str) -> Generator[CriticReview, None, None]:
+def iter_critic_reviews(session: requests.Session, movie: str, max_pages: int | None = None) -> Generator[CriticReview, None, None]:
     url = build_url(movie, "critic_reviews")
     page = 0
     total = 0
     while url is not None:
+        if max_pages is not None and page >= max_pages:
+            break
         page += 1
         response = session.get(url)
         response.raise_for_status()
@@ -35,11 +37,13 @@ def iter_critic_reviews(session: requests.Session, movie: str) -> Generator[Crit
         url = next_link["href"] if next_link else None
 
 
-def iter_user_reviews(session: requests.Session, movie: str) -> Generator[UserReview, None, None]:
+def iter_user_reviews(session: requests.Session, movie: str, max_pages: int | None = None) -> Generator[UserReview, None, None]:
     url = build_url(movie, "user_reviews")
     page = 0
     total = 0
     while url is not None:
+        if max_pages is not None and page >= max_pages:
+            break
         page += 1
         response = session.get(url)
         response.raise_for_status()
@@ -75,7 +79,12 @@ def iter_search(
         total += len(items)
         logger.info("search '%s': got %d items (total so far: %d)", query, len(items), total)
         for item in items:
-            yield DiscoveredMovie.from_slug(item["slug"], method="search")
+            yield DiscoveredMovie.from_slug(
+                item["slug"],
+                method="search",
+                title=item.get("title"),
+                premiere_year=item.get("premiereYear"),
+            )
             yielded += 1
             if max_items is not None and yielded >= max_items:
                 logger.info("search stopped at max_items=%d", max_items)
@@ -126,7 +135,12 @@ def iter_browse(
         total += len(items)
         logger.info("browse: got %d items (total so far: %d)", len(items), total)
         for item in items:
-            yield DiscoveredMovie.from_slug(item["slug"], method="browse")
+            yield DiscoveredMovie.from_slug(
+                item["slug"],
+                method="browse",
+                title=item.get("title"),
+                premiere_year=item.get("premiereYear"),
+            )
             yielded += 1
             if max_items is not None and yielded >= max_items:
                 logger.info("browse stopped at max_items=%d", max_items)

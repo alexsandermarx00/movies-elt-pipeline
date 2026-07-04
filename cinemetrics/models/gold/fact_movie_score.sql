@@ -1,7 +1,7 @@
 with mc_user_agg as (
     select
         movie_slug,
-        round(avg(score), 1)    as user_score,
+        round(avg(score) * 10)::integer as user_score,
         count(*)                as user_review_count
     from {{ ref('silver_mc_user_reviews') }}
     where score is not null
@@ -25,8 +25,7 @@ rt_scores as (
         dm.movie_key,
         'rottentomatoes'                    as platform,
         try_cast(json_extract_string(rts.critics_all, '$.score')       as integer) as critic_score,
-        try_cast(json_extract_string(rts.critics_all, '$.reviewCount') as integer) as critic_review_count,
-        -- Audience score derived from like/dislike counts; no pre-computed score in source
+        -- user_score must be column 4 to align with mc_scores (UNION ALL is positional)
         case
             when (
                 try_cast(json_extract_string(rts.audience_all, '$.likedCount')    as integer) +
@@ -41,6 +40,7 @@ rt_scores as (
                 )
             )::integer
         end                                 as user_score,
+        try_cast(json_extract_string(rts.critics_all, '$.reviewCount') as integer) as critic_review_count,
         (
             try_cast(json_extract_string(rts.audience_all, '$.likedCount')    as integer) +
             try_cast(json_extract_string(rts.audience_all, '$.notLikedCount') as integer)

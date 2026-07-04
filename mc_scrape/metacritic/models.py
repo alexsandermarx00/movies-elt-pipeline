@@ -6,13 +6,23 @@ class DiscoveredMovie(BaseModel):
     slug: str
     discovered_at: datetime
     method: str  # "browse" or "search"
+    title: str | None = None
+    premiere_year: int | None = None
 
     @classmethod
-    def from_slug(cls, slug: str, method: str) -> "DiscoveredMovie":
+    def from_slug(
+        cls,
+        slug: str,
+        method: str,
+        title: str | None = None,
+        premiere_year: int | None = None,
+    ) -> "DiscoveredMovie":
         return cls(
             slug=slug,
             discovered_at=datetime.utcnow(),
             method=method,
+            title=title,
+            premiere_year=premiere_year,
         )
 
 

@@ -7,13 +7,12 @@ from pathlib import Path
 
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
-from airflow.sdk import Asset
+
+from _assets import MC_RAW_ASSET
 
 _DATA = "/opt/airflow/data"
 _MC_FEED = f"{_DATA}/mc"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
-
-MC_RAW_ASSET = Asset("mc_raw_loaded")
 
 
 @dag(
@@ -28,10 +27,18 @@ def mc_scraper_dag():
 
     discover_movies = BashOperator(
         task_id="discover_movies",
-        bash_command="python -m metacritic browse --max-items 500",
+        bash_command=(
+            # Two-pass browse: top Metascore first, then most recent releases.
+            # NOTE: --sort-by needs the = form because the value starts with '-'
+            # (argparse otherwise reads -metaScore as a flag).
+            "python -m metacritic browse --sort-by=-metaScore --max-items 100"
+            " && python -m metacritic browse --sort-by=-releaseDate --max-items 100"
+        ),
         env={"FEED_URI": _MC_FEED},
         append_env=True,
     )
+
+    _MOVIE_LIMIT = 100
 
     @task
     def get_movies() -> list[str]:
@@ -44,11 +51,22 @@ def mc_scraper_dag():
             with open(fp) as f:
                 items = decoder.decode(f.read())
             slugs.extend(item["slug"] for item in items)
-        return list(dict.fromkeys(slugs))
+        return list(dict.fromkeys(slugs))[:_MOVIE_LIMIT]
+
+    _REVIEW_PAGES = 2
 
     @task
     def build_scrape_commands(slugs: list[str]) -> list[str]:
-        return [f"python -m metacritic movie {slug} all" for slug in slugs]
+        commands = [
+            f"python -m metacritic movie {slug} all --max-pages {_REVIEW_PAGES}"
+            for slug in slugs
+        ]
+        # Batch to stay under Airflow's max_map_length (1024)
+        batch_size = max(50, -(-len(commands) // 1000))
+        return [
+            "; ".join(commands[i : i + batch_size])
+            for i in range(0, len(commands), batch_size)
+        ]
 
     @task(outlets=[MC_RAW_ASSET], pool="duckdb")
     def load_raw_to_duckdb() -> None:
@@ -69,6 +87,9 @@ def mc_scraper_dag():
                     data JSON
                 )
             """)
+            # Full-snapshot load: clear the table so re-runs don't accumulate
+            # duplicate copies of every file (bronze stays 1x the files on disk).
+            con.execute(f"TRUNCATE bronze.{table}")
             for fp in glob.glob(f"{_MC_FEED}/{subdir}/*.json"):
                 with open(fp, errors="replace") as f:
                     raw = f.read()

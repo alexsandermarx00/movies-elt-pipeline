@@ -39,6 +39,7 @@ Thumbs.db
 # Scrapy
 .scrapy/
 httpcache/
+.output/
 
 # Claude Code
 .context/

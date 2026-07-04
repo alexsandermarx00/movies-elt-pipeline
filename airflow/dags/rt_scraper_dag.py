@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import glob
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
-from airflow.sdk import Asset
+
+from _assets import RT_RAW_ASSET
 
 _DATA = "/opt/airflow/data"
 _SCRAPERS = "/opt/scrapers/rottentomatoes_spider"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
-
-RT_RAW_ASSET = Asset("rt_raw_loaded")
 
 
 @dag(
@@ -25,19 +24,94 @@ RT_RAW_ASSET = Asset("rt_raw_loaded")
 )
 def rt_scraper_dag():
 
-    discover_films = BashOperator(
-        task_id="discover_films",
-        bash_command="scrapy crawl rt_discovery_spider -a browse_url=movies_at_home",
-        cwd=_SCRAPERS,
-        env={"FEED_URI": f"{_DATA}/rt/discovery.json"},
-        append_env=True,
-    )
+    @task(retries=2, retry_delay=timedelta(seconds=30))
+    def resolve_crosswalk() -> None:
+        """Translate MC imdb_ids → RT slugs via Wikidata SPARQL (P345→P1258).
+
+        Reads imdb_id from MC general output files, POSTs a batched SPARQL
+        query, and writes data/rt/crosswalk.json with one entry per resolved
+        film. TV-series RT entries (P1258 = 'tv/...') are skipped because
+        rtspider only handles /m/ paths.
+        """
+        import os
+        import requests
+
+        # Collect imdb_id + mc_slug + title from MC general output files.
+        # Each file is a JSON array of GeneralItem objects.
+        mc_movies: dict[str, dict] = {}
+        for fp in glob.glob(f"{_DATA}/mc/general/*.json"):
+            try:
+                with open(fp) as f:
+                    items = json.load(f)
+                if isinstance(items, dict):
+                    items = [items]
+                for item in items:
+                    imdb_id = item.get("imdb_id")
+                    mc_slug = item.get("movie_slug") or item.get("slug")
+                    if imdb_id and mc_slug and imdb_id not in mc_movies:
+                        mc_movies[imdb_id] = {
+                            "mc_slug": mc_slug,
+                            "title": item.get("title"),
+                        }
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"Skipping {fp}: {e}")
+
+        os.makedirs(f"{_DATA}/rt", exist_ok=True)
+
+        if not mc_movies:
+            print("No MC movies with imdb_id found; writing empty crosswalk.")
+            with open(f"{_DATA}/rt/crosswalk.json", "w") as f:
+                json.dump([], f)
+            return
+
+        print(f"Querying Wikidata for {len(mc_movies)} IMDB ids...")
+
+        imdb_values = " ".join(f'"{iid}"' for iid in mc_movies)
+        sparql = f"""
+SELECT ?imdb ?rt WHERE {{
+  VALUES ?imdb {{ {imdb_values} }}
+  ?film wdt:P345 ?imdb .
+  ?film wdt:P1258 ?rt .
+}}
+"""
+        resp = requests.post(
+            "https://query.wikidata.org/sparql",
+            data={"query": sparql},
+            headers={
+                "Accept": "application/sparql-results+json",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "movies-elt-pipeline/1.0 (airflow; educational)",
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        bindings = resp.json()["results"]["bindings"]
+
+        crosswalk = []
+        for row in bindings:
+            imdb_id = row["imdb"]["value"]
+            rt_raw = row["rt"]["value"]  # e.g. "m/citizen_kane" or "tv/small_axe/s01"
+            if rt_raw.startswith("tv/"):
+                print(f"Skipping TV entry: {rt_raw} (imdb={imdb_id})")
+                continue
+            rt_slug = rt_raw.removeprefix("m/")
+            mc_info = mc_movies.get(imdb_id, {})
+            crosswalk.append({
+                "imdb_id": imdb_id,
+                "rt_slug": rt_slug,
+                "mc_slug": mc_info.get("mc_slug"),
+                "title": mc_info.get("title"),
+            })
+
+        print(f"Resolved {len(crosswalk)} MC→RT links via Wikidata.")
+        with open(f"{_DATA}/rt/crosswalk.json", "w") as f:
+            json.dump(crosswalk, f)
 
     @task
     def get_films() -> list[str]:
-        with open(f"{_DATA}/rt/discovery.json") as f:
+        with open(f"{_DATA}/rt/crosswalk.json") as f:
             items = json.load(f)
-        return [item["slug"] for item in items]
+        return list(dict.fromkeys(item["rt_slug"] for item in items if item.get("rt_slug")))
 
     @task
     def build_commands(slugs: list[str], action: str) -> list[str]:
@@ -53,7 +127,29 @@ def rt_scraper_dag():
         con = duckdb.connect(_WAREHOUSE)
         con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
 
-        for action in ["score", "details", "reviews"]:
+        # Crosswalk: single file, full snapshot (TRUNCATE + reload)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS bronze.rt_crosswalk (
+                _loaded_at TIMESTAMP,
+                _source_file VARCHAR,
+                data JSON
+            )
+        """)
+        crosswalk_path = f"{_DATA}/rt/crosswalk.json"
+        try:
+            with open(crosswalk_path) as f:
+                raw = f.read()
+            con.execute("TRUNCATE bronze.rt_crosswalk")
+            con.execute(
+                "INSERT INTO bronze.rt_crosswalk (_loaded_at, _source_file, data) "
+                "VALUES (current_timestamp, ?, ?)",
+                [crosswalk_path, json.dumps(json.loads(raw))],
+            )
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Skipping crosswalk load: {e}")
+
+        # Per-action tables: append new files each run
+        for action in ["score", "details", "reviews", "critic_reviews"]:
             con.execute(f"""
                 CREATE TABLE IF NOT EXISTS bronze.rt_{action} (
                     _loaded_at TIMESTAMP,
@@ -77,11 +173,12 @@ def rt_scraper_dag():
 
         con.close()
 
+    xw = resolve_crosswalk()
     slugs = get_films()
-    discover_films >> slugs
+    xw >> slugs
 
     scrapes = []
-    for action in ["score", "details", "reviews"]:
+    for action in ["score", "details", "reviews", "critic_reviews"]:
         commands = build_commands(slugs=slugs, action=action)
         scrape = BashOperator.partial(
             task_id=f"scrape_{action}",

@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def run(movie: str, action: str) -> None:
+def run(movie: str, action: str, max_pages: int | None = None) -> None:
     session = make_session()
 
     if action == "general":
@@ -19,11 +19,11 @@ def run(movie: str, action: str) -> None:
         logger.info("Fetched %d general item(s) for '%s'", len(items), movie)
         write_general(items)
     elif action == "user_reviews":
-        items = list(iter_user_reviews(session, movie))
+        items = list(iter_user_reviews(session, movie, max_pages=max_pages))
         logger.info("Fetched %d user review(s) for '%s'", len(items), movie)
         write_user_reviews(items)
     elif action == "critic_reviews":
-        items = list(iter_critic_reviews(session, movie))
+        items = list(iter_critic_reviews(session, movie, max_pages=max_pages))
         logger.info("Fetched %d critic review(s) for '%s'", len(items), movie)
         write_critic_reviews(items)
     elif action == "all":
@@ -31,11 +31,11 @@ def run(movie: str, action: str) -> None:
         logger.info("Fetched %d general item(s) for '%s'", len(general_items), movie)
         write_general(general_items)
 
-        user_items = list(iter_user_reviews(session, movie))
+        user_items = list(iter_user_reviews(session, movie, max_pages=max_pages))
         logger.info("Fetched %d user review(s) for '%s'", len(user_items), movie)
         write_user_reviews(user_items)
 
-        critic_items = list(iter_critic_reviews(session, movie))
+        critic_items = list(iter_critic_reviews(session, movie, max_pages=max_pages))
         logger.info("Fetched %d critic review(s) for '%s'", len(critic_items), movie)
         write_critic_reviews(critic_items)
     else:
@@ -82,6 +82,8 @@ if __name__ == "__main__":
         choices=["general", "user_reviews", "critic_reviews", "all"],
         help="Data to scrape",
     )
+    movie_parser.add_argument("--max-pages", type=int, default=None,
+                              help="Maximum number of pages to extract for reviews")
 
     search_parser = subparsers.add_parser("search", help="Search movies by title query")
     search_parser.add_argument("query", help="Search query (e.g. 'godfather')")
@@ -103,7 +105,7 @@ if __name__ == "__main__":
 
     try:
         if args.command == "movie":
-            run(args.movie, args.action)
+            run(args.movie, args.action, args.max_pages)
         elif args.command == "search":
             run_search(args.query, args.max_items)
         elif args.command == "browse":

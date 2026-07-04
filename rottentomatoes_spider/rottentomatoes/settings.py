@@ -70,15 +70,11 @@ ITEM_PIPELINES = {
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
 AUTOTHROTTLE_ENABLED = True
-# Base delay between requests — Scrapy will dynamically adjust around this value
-DOWNLOAD_DELAY = 1
-# Initial delay before autothrottle takes over
-AUTOTHROTTLE_START_DELAY = 1
-# Maximum delay autothrottle can set under high server latency
-AUTOTHROTTLE_MAX_DELAY = 10
-# Target number of parallel requests per domain (keep low to be polite)
+DOWNLOAD_DELAY = 2
+RANDOMIZE_DOWNLOAD_DELAY = True  # uses 0.5–1.5× DOWNLOAD_DELAY per request
+AUTOTHROTTLE_START_DELAY = 2
+AUTOTHROTTLE_MAX_DELAY = 15
 AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
-# Log throttling stats per response (useful for debugging, disable in production)
 AUTOTHROTTLE_DEBUG = False
 
 # Enable and configure HTTP caching (disabled by default)

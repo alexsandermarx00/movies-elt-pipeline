@@ -14,32 +14,27 @@ rt as (
         movie_id                                            as rt_movie_id,
         -- Strip trailing year disambiguation suffix added by RT, e.g. "Magic Hour (2025)" → "Magic Hour"
         trim(regexp_replace(title, '\s*\(\d{4}\)\s*$', '')) as title,
-        coalesce(
-            -- RT release_date format is "May 8, 2026" — try_cast to integer/date both fail
-            try_cast(release_date as integer),
-            year(try_strptime(release_date, '%b %d, %Y')),
-            year(try_cast(release_date as date))
-        )                                                   as release_year,
-        urlid                                               as rt_urlid
+        urlid                                               as rt_urlid,
+        imdb_id
     from {{ ref('silver_rt_details') }}
 ),
 joined as (
     select
-        coalesce(mc.mc_slug, rt.rt_movie_id)                as movie_natural_key,
+        coalesce(mc.mc_slug, rt.rt_movie_id)               as movie_natural_key,
         mc.mc_slug,
         rt.rt_movie_id,
-        coalesce(mc.title, rt.title)                        as title,
-        coalesce(mc.release_year, rt.release_year)          as release_year,
+        coalesce(mc.title, rt.title)                       as title,
+        mc.release_year,
         mc.rating,
         mc.duration_minutes,
-        mc.imdb_id,
+        coalesce(mc.imdb_id, rt.imdb_id)                   as imdb_id,
         mc.primary_genre,
         rt.rt_urlid
     from mc
+    -- FULL OUTER JOIN keeps MC-only and RT-only movies as single-source rows.
+    -- MC and RT are matched on imdb_id (sourced from Wikidata P345/P1258 mapping).
     full outer join rt
-        on lower(trim(mc.title)) = lower(trim(rt.title))
-        -- ±1 year tolerance: MC stores festival premiere year, RT stores wide release year
-        and abs(mc.release_year - rt.release_year) <= 1
+        on rt.imdb_id = mc.imdb_id
 )
 select
     row_number() over (order by title, release_year)        as movie_key,

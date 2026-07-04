@@ -40,5 +40,15 @@ class ReviewItem(Item):
     userId = Field()
 
 
+class CriticReviewItem(Item):
+    movie_id    = Field()
+    review_id   = Field()
+    critic_name = Field()
+    publication = Field()
+    score       = Field()
+    quote       = Field()
+    review_date = Field()
+
+
 class FilmSlugItem(Item):
     slug = Field()

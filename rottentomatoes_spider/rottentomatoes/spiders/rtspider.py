@@ -1,7 +1,7 @@
 import json
 import scrapy
 from urllib.parse import urlencode
-from rottentomatoes.items import DetailsItem, ScoreItem, ReviewItem
+from rottentomatoes.items import DetailsItem, ScoreItem, ReviewItem, CriticReviewItem
 
 
 class RtspiderSpider(scrapy.Spider):
@@ -53,6 +53,22 @@ class RtspiderSpider(scrapy.Spider):
             yield scrapy.Request(
                 f"{base_url}?{urlencode(params)}",
                 callback=self.parse_reviews,
+                cb_kwargs={"n": self.max_pages, "movie_code": movie_code}
+            )
+
+        elif self.action == "critic_reviews":
+            movie_code = notas_json["criticReviewHref"].split("/")[-1]
+            self.logger.info("Resolved internal movie code for %s: %s", self.movie_id, movie_code)
+            base_url = f"https://www.rottentomatoes.com/napi/rtcf/v1/movies/{movie_code}/reviews"
+            params = {
+                "after": "",
+                "before": "",
+                "pageCount": 20,
+                "type": "critic",
+            }
+            yield scrapy.Request(
+                f"{base_url}?{urlencode(params)}",
+                callback=self.parse_critic_reviews,
                 cb_kwargs={"n": self.max_pages, "movie_code": movie_code}
             )
 
@@ -117,5 +133,35 @@ class RtspiderSpider(scrapy.Spider):
             yield scrapy.Request(
                 f"{base_url}?{urlencode(params)}",
                 callback=self.parse_reviews,
+                cb_kwargs={"n": n - 1, "movie_code": movie_code}
+            )
+
+    def parse_critic_reviews(self, response, n, movie_code):
+        data = response.json()
+        reviews_extracted = len(data.get("reviews", []))
+        self.logger.info("Extracted %d critic reviews from current page", reviews_extracted)
+        for review in data["reviews"]:
+            item = CriticReviewItem()
+            item["movie_id"]    = self.movie_id
+            item["review_id"]   = review.get("reviewId", None)
+            item["critic_name"] = (review.get("critic") or {}).get("displayName", None)
+            item["publication"] = (review.get("publication") or {}).get("name", None)
+            item["score"]       = review.get("originalScore", review.get("scoreSentiment", None))
+            item["quote"]       = review.get("reviewQuote", None)
+            item["review_date"] = review.get("createDate", None)
+            yield item
+
+        if data["pageInfo"]["hasNextPage"] is True and n > 1:
+            self.logger.info("Found next critic page (n=%d limit remaining). Yielding next request.", n - 1)
+            base_url = f"https://www.rottentomatoes.com/napi/rtcf/v1/movies/{movie_code}/reviews"
+            params = {
+                "after": data["pageInfo"]["endCursor"],
+                "before": "",
+                "pageCount": 20,
+                "type": "critic",
+            }
+            yield scrapy.Request(
+                f"{base_url}?{urlencode(params)}",
+                callback=self.parse_critic_reviews,
                 cb_kwargs={"n": n - 1, "movie_code": movie_code}
             )

@@ -31,7 +31,10 @@ class SpiderExitCodeExtension:
         error_count = stats.get("spider_exceptions/Exception", 0)
         log_errors = stats.get("log_count/ERROR", 0)
 
-        if reason != "finished" or error_count > 0 or log_errors > 0:
+        # Only fail on abnormal close or actual pipeline exceptions.
+        # HTTP-level errors (4xx/5xx) increment log_count/ERROR but the spider
+        # still finishes cleanly with partial data, so we don't fail on those.
+        if reason != "finished" or error_count > 0:
             logger.error(
                 "Spider closed with reason='%s', errors=%d, log_errors=%d. Exiting with code 1.",
                 reason,

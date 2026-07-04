@@ -9,6 +9,9 @@ models:
     columns:
       - name: date_key
         description: Surrogate key (integer).
+        tests:
+          - unique
+          - not_null
       - name: date_day
         description: Calendar date.
       - name: year
@@ -26,13 +29,16 @@ models:
   - name: dim_movie
     description: >
       One row per movie (SCD Type 1). Metacritic and Rotten Tomatoes records are
-      matched by lower-cased title and release year. Unmatched records from either
-      platform are retained via FULL OUTER JOIN, so mc_slug or rt_movie_id may be
-      NULL. Primary genre is the first element of the Metacritic genres JSON array;
-      multi-genre modelling is deferred to future work.
+      matched on imdb_id via a Wikidata-curated IMDB→RT slug mapping (P345/P1258).
+      Unmatched records from either platform are retained via FULL OUTER JOIN, so
+      mc_slug or rt_movie_id may be NULL. Primary genre is the first element of the
+      Metacritic genres JSON array; multi-genre modelling is deferred to future work.
     columns:
       - name: movie_key
         description: Surrogate key.
+        tests:
+          - unique
+          - not_null
       - name: movie_natural_key
         description: mc_slug when available, rt_movie_id otherwise.
       - name: mc_slug
@@ -52,15 +58,20 @@ models:
 
   - name: dim_critic
     description: >
-      One row per critic (by author_slug). Sourced exclusively from Metacritic
-      critic reviews; Rotten Tomatoes does not expose structured critic identity
-      data in the scraped dataset. The most recently loaded row per slug is kept
-      to handle name or publication corrections.
+      One row per critic (by author_slug). Sourced from Metacritic and Rotten
+      Tomatoes critic reviews. MC slugs are prefixed with 'mc::'; RT slugs are
+      prefixed with 'rt::' and derived from the critic name. The most recently
+      loaded row per slug is kept to handle name or publication corrections.
     columns:
       - name: critic_key
         description: Surrogate key.
+        tests:
+          - unique
+          - not_null
       - name: author_slug
-        description: Metacritic author slug; natural key.
+        description: >
+          Critic natural key. Prefixed with 'mc::' for Metacritic critics,
+          'rt::' for Rotten Tomatoes critics.
       - name: critic_name
       - name: publication_name
       - name: publication_slug
@@ -68,23 +79,36 @@ models:
   - name: fact_movie_score
     description: >
       One row per (movie, platform) with current-state aggregate scores.
-      No history is tracked (see future work). Metacritic user scores are on a
-      0–10 scale; Rotten Tomatoes critic_score is the Tomatometer percentage
-      (0–100) and user_score is the Popcornmeter percentage computed from
+      No history is tracked (see future work). Metacritic user scores are
+      normalised from 0–10 to 0–100 (multiplied by 10). Rotten Tomatoes
+      critic_score is the Tomatometer percentage (0–100) and user_score is
+      the Popcornmeter percentage computed from
       audienceAll.likedCount / (likedCount + notLikedCount).
     columns:
       - name: score_key
         description: Surrogate key.
+        tests:
+          - unique
+          - not_null
       - name: movie_key
         description: FK → dim_movie.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_movie')
+              field: movie_key
       - name: platform
         description: "'metacritic' or 'rottentomatoes'."
+        tests:
+          - accepted_values:
+              values: ['metacritic', 'rottentomatoes']
       - name: critic_score
         description: >
           MC: Metascore (0–100). RT: Tomatometer percentage (0–100).
       - name: user_score
         description: >
-          MC: average user score (0–10). RT: Popcornmeter percentage (0–100).
+          Audience score normalised to 0–100 scale.
+          MC raw score (0–10) is multiplied by 10. RT Popcornmeter is already 0–100.
       - name: critic_review_count
       - name: user_review_count
         description: >
@@ -93,21 +117,37 @@ models:
 
   - name: fact_critic_review
     description: >
-      One row per Metacritic critic review (transactional grain). Surrogate keys
-      from dim_movie, dim_critic, and dim_date are resolved via LEFT JOIN, so
-      rows with unresolvable keys will have NULL FKs rather than being dropped.
+      One row per critic review (transactional grain) from Metacritic and Rotten
+      Tomatoes. Surrogate keys from dim_movie, dim_critic, and dim_date are resolved
+      via LEFT JOIN, so rows with unresolvable keys will have NULL FKs rather than
+      being dropped.
     columns:
       - name: critic_review_key
         description: Surrogate key.
+        tests:
+          - unique
+          - not_null
       - name: movie_key
         description: FK → dim_movie. NULL if movie not in dim_movie.
+        tests:
+          - relationships:
+              to: ref('dim_movie')
+              field: movie_key
       - name: critic_key
         description: FK → dim_critic. NULL if critic not in dim_critic.
+        tests:
+          - relationships:
+              to: ref('dim_critic')
+              field: critic_key
       - name: date_key
         description: FK → dim_date. NULL if review_date is unparseable.
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
       - name: platform
-        description: Always 'metacritic' in current scope.
+        description: "'metacritic' or 'rottentomatoes'."
       - name: score
-        description: Critic score on Metacritic scale (0–100).
+        description: Critic score (0–100).
       - name: quote
         description: Review excerpt.
