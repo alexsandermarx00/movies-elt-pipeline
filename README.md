@@ -22,8 +22,31 @@ Orchestration: Airflow 3.2.1 · LocalExecutor · Docker Compose
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) + Docker Compose
-- [uv](https://docs.astral.sh/uv/) *(optional — for querying DuckDB locally)*
-- [DuckDB CLI](https://duckdb.org/docs/installation/) *(optional — for querying DuckDB locally)*
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/) *(optional — only needed to run `dbt` or query DuckDB from your host instead of inside the containers)*
+- [DuckDB CLI](https://duckdb.org/docs/installation/) *(optional — only needed to query DuckDB from your host)*
+
+The Docker Compose stack is self-contained: the Airflow image bundles the scrapers, `dbt-core`, and `dbt-duckdb` (see `airflow/Dockerfile`), so nothing below is required just to run the pipeline end-to-end. It's only needed if you want to run `dbt` commands or query the warehouse directly from your host machine.
+
+## Local Development Setup
+
+To run `dbt` commands or the scrapers directly on your host (outside Docker), create a virtual environment and install the dependencies for the piece you're working on:
+
+```bash
+# From the repo root
+uv venv
+source .venv/bin/activate   # .venv\Scripts\activate on Windows
+
+# dbt (cinemetrics/)
+uv pip install -r cinemetrics/requirements.txt
+
+# Rotten Tomatoes spider (optional)
+uv pip install -r rottentomatoes_spider/requirements.txt
+
+# Metacritic scraper (optional — uses its own uv-managed environment)
+cd mc_scrape && uv sync && cd ..
+```
+
+`cinemetrics/requirements.txt` pins the Python packages dbt needs (`dbt-core`, `dbt-duckdb`). It does not include the DuckDB CLI binary — install that separately if you want to query `data/warehouse.duckdb` from a terminal instead of through Python.
 
 ## Running the Pipeline (End-to-End)
 
@@ -36,13 +59,14 @@ Orchestration: Airflow 3.2.1 · LocalExecutor · Docker Compose
    Access the Airflow UI at `http://localhost:8080` (default credentials: `airflow` / `airflow`).
    Unpause the DAGs: `rt_scraper`, `mc_scraper`, and `dbt_build`.
 3. **Run dbt manually (optional)**:
-   You can also run transformations manually locally using `dbt`:
+   With the [local dev environment](#local-development-setup) set up and activated, you can also run transformations manually:
    ```bash
    cd cinemetrics
-   dbt deps
+   dbt deps    # installs dbt packages declared in packages.yml (e.g. dbt_expectations)
    dbt build
    dbt test
    ```
+   `dbt build` reads/writes `data/warehouse.duckdb` by default (see `cinemetrics/profiles.yml`), the same file the Docker pipeline uses — run this while the containers are idle to avoid DuckDB file-lock conflicts.
 
 ## Querying the data
 
@@ -53,9 +77,6 @@ duckdb data/warehouse.duckdb
 ```
 
 ```sql
--- Open the browser UI (http://localhost:4213)
-CALL start_ui();
-
 SHOW ALL TABLES;
 
 -- Raw records
@@ -69,6 +90,21 @@ FROM raw.rt_reviews,
 LATERAL (SELECT unnest(data::JSON[])) t(record)
 LIMIT 10;
 ```
+
+### Using the DuckDB browser UI
+
+DuckDB ships a local web UI for browsing schemas/tables and running SQL visually, as an alternative to the CLI prompt. From the same `duckdb` CLI session:
+
+```sql
+CALL start_ui();
+```
+
+This opens `http://localhost:4213` in your browser. Notes:
+
+- The first call downloads the `ui` extension from DuckDB's extension repository, so it needs internet access once; after that it's cached locally and works offline.
+- The UI connects to whichever database file you opened the CLI with (`data/warehouse.duckdb` in the command above) — it shares the same connection, so any query you've already run in the CLI is reflected there.
+- Use the schema browser on the left to explore `raw`, `silver`, and `gold` schemas/tables, and the SQL editor pane to run ad-hoc queries with results rendered as a table.
+- Close the UI with `CALL close_ui();`, or just close the CLI session.
 
 ## Project structure
 
