@@ -67,15 +67,28 @@ ITEM_PIPELINES = {
 }
 
 
+import os as _os
+
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
+# Rate knobs are env-tunable so concurrency can be dialed to RT's tolerance
+# without editing code (see the scaling plan's "balanced" tuning).
 AUTOTHROTTLE_ENABLED = True
-DOWNLOAD_DELAY = 2
+DOWNLOAD_DELAY = float(_os.environ.get("RT_DOWNLOAD_DELAY", "2"))
 RANDOMIZE_DOWNLOAD_DELAY = True  # uses 0.5–1.5× DOWNLOAD_DELAY per request
 AUTOTHROTTLE_START_DELAY = 2
-AUTOTHROTTLE_MAX_DELAY = 15
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+AUTOTHROTTLE_MAX_DELAY = float(_os.environ.get("RT_AUTOTHROTTLE_MAX_DELAY", "30"))
+AUTOTHROTTLE_TARGET_CONCURRENCY = float(_os.environ.get("RT_TARGET_CONCURRENCY", "1.0"))
+CONCURRENT_REQUESTS_PER_DOMAIN = int(_os.environ.get("RT_CONCURRENCY_PER_DOMAIN", "4"))
 AUTOTHROTTLE_DEBUG = False
+
+# Retry on throttling / transient errors. 429 and 503 are the throttle signals;
+# RetryMiddleware honors Retry-After. More attempts + backoff so a brief block
+# recovers within the crawl instead of failing the whole shard.
+RETRY_ENABLED = True
+RETRY_TIMES = int(_os.environ.get("RT_RETRY_TIMES", "5"))
+RETRY_HTTP_CODES = [500, 502, 503, 504, 522, 524, 408, 429]
+RETRY_BACKOFF = True  # Scrapy 2.12+: exponential backoff between retries
 
 # Enable and configure HTTP caching (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings

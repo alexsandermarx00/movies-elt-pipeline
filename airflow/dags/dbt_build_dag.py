@@ -10,7 +10,11 @@ _DBT_DIR = "/opt/airflow/cinemetrics"
 _WAREHOUSE = "/opt/airflow/data/warehouse.duckdb"
 _INIT_SQL = "/opt/airflow/sql/init_warehouse.sql"
 
-_DBT_CMD = f"cd {_DBT_DIR} && dbt build --profiles-dir . --project-dir ."
+# `dbt deps` installs packages declared in packages.yml (e.g. dbt_expectations)
+# into cinemetrics/dbt_packages. It must run here rather than at image build:
+# cinemetrics/ is a host-mounted volume, so anything baked into the image is
+# shadowed by the mount. deps is idempotent, so running it each build is safe.
+_DBT_CMD = f"cd {_DBT_DIR} && dbt deps --profiles-dir . --project-dir . && dbt build --profiles-dir . --project-dir ."
 
 
 @dag(

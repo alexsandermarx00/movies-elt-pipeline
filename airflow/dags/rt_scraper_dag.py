@@ -7,16 +7,27 @@ from datetime import datetime, timedelta
 from airflow.decorators import dag, task
 from airflow.operators.bash import BashOperator
 
-from _assets import RT_RAW_ASSET
+from _assets import MC_RAW_ASSET, RT_RAW_ASSET
 
 _DATA = "/opt/airflow/data"
 _SCRAPERS = "/opt/scrapers/rottentomatoes_spider"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
 
+# RT rate knobs from Airflow Variables (Admin > Variables), templated into the
+# scrapy subprocess env so they can be changed live without recreating containers.
+_RT_RATE_ENV = {
+    "RT_DOWNLOAD_DELAY": "{{ var.value.get('rt_download_delay', '2') }}",
+    "RT_RETRY_TIMES": "{{ var.value.get('rt_retry_times', '5') }}",
+}
+
 
 @dag(
     dag_id="rt_scraper",
-    schedule="@daily",
+    # RT consumes MC's output (resolve_crosswalk reads data/mc/general/*.json),
+    # so trigger off MC's asset instead of an independent @daily schedule. This
+    # enforces MC → RT ordering; @daily fired both DAGs simultaneously and RT
+    # would race MC's not-yet-written general files on a fresh run.
+    schedule=[MC_RAW_ASSET],
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -115,9 +126,31 @@ SELECT ?imdb ?rt WHERE {{
 
     @task
     def build_commands(slugs: list[str], action: str) -> list[str]:
-        return [
+        import os
+
+        # Resume: skip (slug, action) pairs already completed in a prior run
+        # (marker written by the spider's closed() on success). RT_FORCE=true
+        # re-scrapes everything.
+        done_dir = f"{_DATA}/rt/.done/{action}"
+        force = os.environ.get("RT_FORCE", "").strip().lower() == "true"
+        todo = [
+            s for s in slugs
+            if force or not os.path.exists(f"{done_dir}/{s}.marker")
+        ]
+        commands = [
             f"scrapy crawl rtspider -a movie={slug} -a action={action}"
-            for slug in slugs
+            for slug in todo
+        ]
+        # No-op keeps the task successful (not skipped) so downstream load still
+        # runs and emits the asset when everything is already done.
+        if not commands:
+            return ["echo 'rt scrape: nothing to do (all slugs already done)'"]
+        # Batch to stay under Airflow's max_map_length (1024): one mapped task
+        # instance per batch, running its scrapy crawls sequentially.
+        batch_size = max(50, -(-len(commands) // 1000))
+        return [
+            "; ".join(commands[i : i + batch_size])
+            for i in range(0, len(commands), batch_size)
         ]
 
     @task(outlets=[RT_RAW_ASSET], pool="duckdb")
@@ -183,8 +216,18 @@ SELECT ?imdb ?rt WHERE {{
         scrape = BashOperator.partial(
             task_id=f"scrape_{action}",
             cwd=_SCRAPERS,
-            env={"FEED_URI": f"{_DATA}/rt/{action}/%(name)s_%(time)s.json"},
+            env={
+                "FEED_URI": f"{_DATA}/rt/{action}/%(name)s_%(time)s.json",
+                "RT_DONE_DIR": f"{_DATA}/rt/.done",
+                **_RT_RATE_ENV,
+            },
             append_env=True,
+            # Bound concurrent scrapy processes (pool) + self-heal on throttling.
+            pool="rt_scrape",
+            retries=3,
+            retry_delay=timedelta(minutes=2),
+            retry_exponential_backoff=True,
+            max_retry_delay=timedelta(minutes=30),
         ).expand(bash_command=commands)
         scrapes.append(scrape)
 

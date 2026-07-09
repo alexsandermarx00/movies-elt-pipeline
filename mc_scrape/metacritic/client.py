@@ -31,10 +31,14 @@ def make_session() -> requests.Session:
     import time
 
     session = requests.Session()
+    # 429/5xx are retried with exponential backoff at the transport layer, and
+    # Retry-After is honored (respect_retry_after_header). Knobs are env-tunable
+    # so the request rate can be dialed to a site's tolerance without code edits.
     retry = Retry(
-        total=5,
-        backoff_factor=2,
-        status_forcelist=[429, 500, 502, 503],
+        total=int(os.environ.get("MC_MAX_RETRIES", "5")),
+        backoff_factor=float(os.environ.get("MC_BACKOFF_FACTOR", "2")),
+        status_forcelist=[429, 500, 502, 503, 504],
+        respect_retry_after_header=True,
         raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry)
@@ -46,23 +50,39 @@ def make_session() -> requests.Session:
         "Accept-Language": "en-US,en;q=0.9",
     })
 
+    delay_min = float(os.environ.get("MC_REQUEST_DELAY_MIN", "1.0"))
+    delay_max = float(os.environ.get("MC_REQUEST_DELAY_MAX", "3.0"))
+
     def _throttle(response, **kwargs):
-        time.sleep(random.uniform(1.0, 3.0))
+        time.sleep(random.uniform(delay_min, delay_max))
 
     session.hooks["response"].append(_throttle)
     return session
 
 
 def fetch_api_key(session: requests.Session) -> str:
-    logger.info("Fetching Metacritic API key from homepage")
-    response = session.get(_MC_HOME)
-    response.raise_for_status()
-    match = _API_KEY_RE.search(response.text)
-    if not match:
-        raise RuntimeError("Could not extract Metacritic API key from page HTML")
-    key = match.group(1)
-    logger.info("API key fetched successfully")
-    return key
+    import random
+    import time
+
+    # A 200 with no apiKey in the HTML is a bot/interstitial page — a soft block.
+    # urllib3's Retry can't catch it (it's a 200), so retry with backoff here.
+    attempts = int(os.environ.get("MC_APIKEY_MAX_ATTEMPTS", "5"))
+    for attempt in range(1, attempts + 1):
+        logger.info("Fetching Metacritic API key from homepage (attempt %d/%d)", attempt, attempts)
+        response = session.get(_MC_HOME)
+        response.raise_for_status()
+        match = _API_KEY_RE.search(response.text)
+        if match:
+            logger.info("API key fetched successfully")
+            return match.group(1)
+        if attempt < attempts:
+            delay = min(2 ** attempt + random.uniform(0, 1), 60)
+            logger.warning(
+                "No API key in homepage HTML (likely a bot page); backing off %.1fs before retry",
+                delay,
+            )
+            time.sleep(delay)
+    raise RuntimeError("Could not extract Metacritic API key from page HTML after retries")
 
 
 def get_api_key(session: requests.Session) -> str:

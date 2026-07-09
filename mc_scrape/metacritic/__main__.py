@@ -1,17 +1,33 @@
+import os
 import sys
 import logging
 import argparse
+from pathlib import Path
 
-from .client import make_session
+from .client import make_session, fetch_api_key, get_api_key
 from .extractors import iter_general, iter_critic_reviews, iter_user_reviews, iter_search, iter_browse
-from .output import write_general, write_critic_reviews, write_user_reviews, write_discovered
+from .output import FEED_URI, write_general, write_critic_reviews, write_user_reviews, write_discovered
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 logger = logging.getLogger(__name__)
 
 
-def run(movie: str, action: str, max_pages: int | None = None) -> None:
+def _marker_path(movie: str, action: str) -> Path:
+    """Per-(movie, action) completion marker under FEED_URI/.done.
+
+    Lets a re-run skip movies already scraped in a previous session — the key to
+    surviving an IP block mid-catalog: re-trigger and it resumes where it stopped.
+    """
+    return Path(FEED_URI) / ".done" / action / f"{movie}.marker"
+
+
+def run(movie: str, action: str, max_pages: int | None = None, force: bool = False) -> None:
+    marker = _marker_path(movie, action)
+    if not force and marker.exists():
+        logger.info("Skipping '%s' (%s): already scraped (marker exists)", movie, action)
+        return
+
     session = make_session()
 
     if action == "general":
@@ -40,6 +56,20 @@ def run(movie: str, action: str, max_pages: int | None = None) -> None:
         write_critic_reviews(critic_items)
     else:
         raise ValueError(f"Unknown action: '{action}'")
+
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+
+
+def run_apikey() -> None:
+    """Fetch the Metacritic API key once and print it to stdout.
+
+    Used by the DAG to resolve the key a single time and pass it to every scrape
+    task via MC_API_KEY, so ~20k movie scrapes never re-hit the homepage (the
+    main bot-block vector). Only the key is printed; logs go to stderr.
+    """
+    key = fetch_api_key(make_session())
+    print(key)
 
 
 def run_search(query: str, max_items: int | None = None) -> list[str]:
@@ -84,6 +114,10 @@ if __name__ == "__main__":
     )
     movie_parser.add_argument("--max-pages", type=int, default=None,
                               help="Maximum number of pages to extract for reviews")
+    movie_parser.add_argument("--force", action="store_true",
+                              help="Re-scrape even if a completion marker exists (ignore resume)")
+
+    subparsers.add_parser("apikey", help="Fetch and print the Metacritic API key")
 
     search_parser = subparsers.add_parser("search", help="Search movies by title query")
     search_parser.add_argument("query", help="Search query (e.g. 'godfather')")
@@ -105,7 +139,9 @@ if __name__ == "__main__":
 
     try:
         if args.command == "movie":
-            run(args.movie, args.action, args.max_pages)
+            run(args.movie, args.action, args.max_pages, force=args.force)
+        elif args.command == "apikey":
+            run_apikey()
         elif args.command == "search":
             run_search(args.query, args.max_items)
         elif args.command == "browse":

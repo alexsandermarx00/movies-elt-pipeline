@@ -35,7 +35,9 @@ models:
       Metacritic genres JSON array; multi-genre modelling is deferred to future work.
     tests:
       - dbt_expectations.expect_table_row_count_to_be_between:
-          min_value: 100
+          # Dev pipeline scrapes a capped set of movies (mc_scraper._MOVIE_LIMIT),
+          # so the floor just guards against an empty dim_movie, not production scale.
+          min_value: 1
           max_value: 1000000
     columns:
       - name: movie_key

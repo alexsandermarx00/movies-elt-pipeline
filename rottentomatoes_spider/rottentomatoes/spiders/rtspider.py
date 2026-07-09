@@ -1,4 +1,7 @@
 import json
+import os
+from pathlib import Path
+
 import scrapy
 from urllib.parse import urlencode
 from rottentomatoes.items import DetailsItem, ScoreItem, ReviewItem, CriticReviewItem
@@ -18,6 +21,21 @@ class RtspiderSpider(scrapy.Spider):
             self.max_pages = 2
         super().__init__(**kwargs)
         self.logger.info("Initialized spider for movie '%s' with action '%s' and max_pages '%s'", movie, action, self.max_pages)
+
+    def closed(self, reason):
+        # Resume support: only mark (movie, action) done when the crawl finished
+        # cleanly AND produced items. A block/error yields 0 items -> no marker ->
+        # a re-run retries it. The DAG skips (movie, action) whose marker exists.
+        if reason != "finished":
+            return
+        scraped = self.crawler.stats.get_value("item_scraped_count", 0)
+        if not scraped:
+            self.logger.info("No items for %s/%s; leaving unmarked for retry", self.movie_id, self.action)
+            return
+        done_dir = Path(os.environ.get("RT_DONE_DIR", ".output/.done")) / self.action
+        done_dir.mkdir(parents=True, exist_ok=True)
+        (done_dir / f"{self.movie_id}.marker").touch()
+        self.logger.info("Marked %s/%s done (%d items)", self.movie_id, self.action, scraped)
 
     def parse(self, response):
         notas_json_str = response.xpath("//script[@id='media-scorecard-json']/text()").get()
