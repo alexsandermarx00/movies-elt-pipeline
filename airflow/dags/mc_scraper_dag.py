@@ -14,6 +14,7 @@ from _assets import MC_RAW_ASSET
 _DATA = "/opt/airflow/data"
 _MC_FEED = f"{_DATA}/mc"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
+_MC_RAW_SUBDIRS = ["discovered_movies", "general", "critic_reviews", "user_reviews", ".done"]
 
 # Rate/politeness knobs sourced from Airflow Variables (Admin > Variables in the
 # UI) so they can be changed live without recreating containers. Templated into
@@ -41,6 +42,16 @@ _MC_DISCOVER_ENV = {
     tags=["metacritic"],
 )
 def mc_scraper_dag():
+
+    @task
+    def clean_raw_feed() -> None:
+        import shutil
+
+        for subdir in _MC_RAW_SUBDIRS:
+            d = Path(_MC_FEED) / subdir
+            if d.exists():
+                shutil.rmtree(d)
+            d.mkdir(parents=True, exist_ok=True)
 
     # Resolve the Metacritic API key ONCE, then hand it to every downstream task
     # via MC_API_KEY. get_api_key() short-circuits on that env var, so the ~20k
@@ -151,7 +162,7 @@ def mc_scraper_dag():
         con.close()
 
     slugs = get_movies()
-    fetch_api_key >> discover_movies >> slugs
+    clean_raw_feed() >> fetch_api_key >> discover_movies >> slugs
 
     commands = build_scrape_commands(slugs=slugs)
     scrape = BashOperator.partial(

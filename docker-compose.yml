@@ -73,7 +73,7 @@ services:
           airflow pools set mc_scrape 3 "Bounds concurrent Metacritic scrape tasks (rate dial)"
           airflow pools set rt_scrape 3 "Bounds concurrent Rotten Tomatoes scrape processes (rate dial)"
           seed() { airflow variables list -o plain 2>/dev/null | grep -qx "$1" || airflow variables set "$1" "$2"; }
-          seed mc_movie_limit 10          # movies to scrape per run; 0 = no cap (all discovered)
+          seed mc_movie_limit 0           # movies to scrape per run; 0 = no cap (all discovered)
           seed mc_discover_by_year false  # true = catalog-scale year-sharded discovery
           seed mc_discover_year_min 1990
           seed mc_discover_year_max 2026
