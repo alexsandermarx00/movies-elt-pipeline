@@ -1,76 +1,75 @@
 # movies-elt-pipeline
 
-Local ELT pipeline that scrapes movie data from **Rotten Tomatoes** and **Metacritic**, loads raw JSON into **DuckDB**, and transforms it with **dbt**. Orchestrated by Apache Airflow running in Docker Compose.
+Pipeline ELT local que coleta dados de filmes do **Rotten Tomatoes** e do **Metacritic**, carrega o JSON bruto no **DuckDB** e o transforma com **dbt**. Orquestrado pelo Apache Airflow rodando em Docker Compose.
 
-## Architecture
+## Arquitetura
 
 ```
 Rotten Tomatoes  ──► Scrapy spider  ──┐
-                                       ├──► JSON files ──► DuckDB (raw) ──► dbt (silver/gold)
+                                       ├──► Arquivos JSON ──► DuckDB (raw) ──► dbt (silver/gold)
 Metacritic       ──► Python scraper ──┘
 
-Orchestration: Airflow 3.2.1 · LocalExecutor · Docker Compose
+Orquestração: Airflow 3.2.1 · LocalExecutor · Docker Compose
 ```
 
-| Layer | Tool |
+| Camada | Ferramenta |
 |---|---|
-| Extraction | Scrapy (RT) · `mc-scrape` Python package (Metacritic) |
-| Orchestration | Apache Airflow 3.2.1 (LocalExecutor) |
-| Raw storage | JSON files on disk + DuckDB `raw` schema |
-| Transformation | dbt Core with `dbt-duckdb` |
+| Extração | Scrapy (RT) · pacote Python `mc-scrape` (Metacritic) |
+| Orquestração | Apache Airflow 3.2.1 (LocalExecutor) |
+| Armazenamento bruto | Arquivos JSON em disco + schema `raw` do DuckDB |
+| Transformação | dbt Core com `dbt-duckdb` |
 
-## Prerequisites
+## Pré-requisitos
 
 - [Docker](https://docs.docker.com/get-docker/) + Docker Compose
-- Python 3.10+ and [uv](https://docs.astral.sh/uv/) *(optional — only needed to run `dbt` or query DuckDB from your host instead of inside the containers)*
-- [DuckDB CLI](https://duckdb.org/docs/installation/) *(optional — only needed to query DuckDB from your host)*
+- Python 3.10+ *(opcional — necessário apenas para rodar o `dbt` ou consultar o DuckDB a partir do seu host em vez de dentro dos containers)*
+- [DuckDB CLI](https://duckdb.org/docs/installation/) *(opcional — necessário apenas para consultar o DuckDB a partir do seu host)*
 
-The Docker Compose stack is self-contained: the Airflow image bundles the scrapers, `dbt-core`, and `dbt-duckdb` (see `airflow/Dockerfile`), so nothing below is required just to run the pipeline end-to-end. It's only needed if you want to run `dbt` commands or query the warehouse directly from your host machine.
+O stack do Docker Compose é autocontido: a imagem do Airflow já embute os scrapers, o `dbt-core` e o `dbt-duckdb` (veja `airflow/Dockerfile`), então nada abaixo é necessário apenas para rodar o pipeline de ponta a ponta. Isso só é necessário se você quiser rodar comandos `dbt` ou consultar o warehouse diretamente a partir da sua máquina host.
 
-## Local Development Setup
+## Configuração do ambiente de desenvolvimento local
 
-To run `dbt` commands or the scrapers directly on your host (outside Docker), create a virtual environment and install the dependencies for the piece you're working on:
+Para rodar comandos `dbt` ou os scrapers diretamente no seu host (fora do Docker), crie um ambiente virtual e instale as dependências da parte com a qual você está trabalhando:
 
 ```bash
-# From the repo root
-uv venv
-source .venv/bin/activate   # .venv\Scripts\activate on Windows
+# A partir da raiz do repositório
+python -m venv .venv
+source .venv/bin/activate   # .venv\Scripts\activate no Windows
 
 # dbt (cinemetrics/)
-uv pip install -r cinemetrics/requirements.txt
+pip install -r cinemetrics/requirements.txt
 
-# Rotten Tomatoes spider (optional)
-uv pip install -r rottentomatoes_spider/requirements.txt
+# Spider do Rotten Tomatoes (opcional)
+pip install -r rottentomatoes_spider/requirements.txt
 
-# Metacritic scraper (optional — uses its own uv-managed environment)
-cd mc_scrape && uv sync && cd ..
+# Scraper do Metacritic (opcional — instalado como pacote editável)
+pip install -e mc_scrape/
 ```
 
-`cinemetrics/requirements.txt` pins the Python packages dbt needs (`dbt-core`, `dbt-duckdb`). It does not include the DuckDB CLI binary — install that separately if you want to query `data/warehouse.duckdb` from a terminal instead of through Python.
+`cinemetrics/requirements.txt` fixa os pacotes Python que o dbt precisa (`dbt-core`, `dbt-duckdb`). Ele não inclui o binário do DuckDB CLI — instale-o separadamente se quiser consultar `data/warehouse.duckdb` a partir de um terminal em vez de via Python.
 
-## Running the Pipeline (End-to-End)
+## Rodando o pipeline (de ponta a ponta)
 
-1. **Start the infrastructure**:
+1. **Suba a infraestrutura**:
    ```bash
-   # Start everything (builds image on first run)
+   # Sobe tudo (constrói a imagem na primeira execução)
    docker compose up --build -d
    ```
-2. **Trigger the DAGs**: 
-   Access the Airflow UI at `http://localhost:8080` (default credentials: `airflow` / `airflow`).
-   Unpause the DAGs: `rt_scraper`, `mc_scraper`, and `dbt_build`.
-3. **Run dbt manually (optional)**:
-   With the [local dev environment](#local-development-setup) set up and activated, you can also run transformations manually:
+2. **Dispare as DAGs**: 
+   Acesse a interface do Airflow em `http://localhost:8080` (credenciais padrão: `airflow` / `airflow`).
+   Despause as DAGs: `rt_scraper`, `mc_scraper` e `dbt_build`.
+3. **Rode o dbt manualmente (opcional)**:
+   Com o [ambiente de desenvolvimento local](#configuração-do-ambiente-de-desenvolvimento-local) configurado e ativado, você também pode rodar as transformações manualmente:
    ```bash
    cd cinemetrics
-   dbt deps    # installs dbt packages declared in packages.yml (e.g. dbt_expectations)
-   dbt build
-   dbt test
+   dbt deps --profiles-dir . --project-dir .    # instala os pacotes dbt declarados em packages.yml (ex.: dbt_expectations)
+   dbt build --profiles-dir . --project-dir .
    ```
-   `dbt build` reads/writes `data/warehouse.duckdb` by default (see `cinemetrics/profiles.yml`), the same file the Docker pipeline uses — run this while the containers are idle to avoid DuckDB file-lock conflicts.
+   A flag `--profiles-dir .` é necessária: sem ela, o dbt ignora o `cinemetrics/profiles.yml` do repositório e usa `~/.dbt/profiles.yml` (se existir) ou falha caso não exista — é exatamente assim que a DAG `dbt_build` invoca o dbt (veja `airflow/dags/dbt_build_dag.py`). Com a flag, `dbt build` lê/escreve em `data/warehouse.duckdb` (veja `cinemetrics/profiles.yml`), o mesmo arquivo usado pelo pipeline Docker — rode isso enquanto os containers estiverem parados para evitar conflitos de lock de arquivo no DuckDB. `dbt build` já executa os testes; não é necessário rodar `dbt test` separadamente depois.
 
-## Querying the data
+## Consultando os dados
 
-Scraped data lands in `data/warehouse.duckdb`. Query it with the DuckDB CLI:
+Os dados coletados são gravados em `data/warehouse.duckdb`. Consulte-os com o DuckDB CLI:
 
 ```bash
 duckdb data/warehouse.duckdb
@@ -79,10 +78,10 @@ duckdb data/warehouse.duckdb
 ```sql
 SHOW ALL TABLES;
 
--- Raw records
+-- Registros brutos
 SELECT _source_file, _loaded_at FROM raw.rt_reviews LIMIT 5;
 
--- Extract fields from JSON
+-- Extrai campos do JSON
 SELECT
     json_extract_string(record, '$.movie_id') AS movie,
     json_extract_string(record, '$.quote')    AS quote
@@ -91,48 +90,48 @@ LATERAL (SELECT unnest(data::JSON[])) t(record)
 LIMIT 10;
 ```
 
-### Using the DuckDB browser UI
+### Usando a interface web do DuckDB
 
-DuckDB ships a local web UI for browsing schemas/tables and running SQL visually, as an alternative to the CLI prompt. From the same `duckdb` CLI session:
+O DuckDB traz uma interface web local para navegar por schemas/tabelas e rodar SQL visualmente, como alternativa ao prompt do CLI. Na mesma sessão do CLI `duckdb`:
 
 ```sql
 CALL start_ui();
 ```
 
-This opens `http://localhost:4213` in your browser. Notes:
+Isso abre `http://localhost:4213` no seu navegador. Observações:
 
-- The first call downloads the `ui` extension from DuckDB's extension repository, so it needs internet access once; after that it's cached locally and works offline.
-- The UI connects to whichever database file you opened the CLI with (`data/warehouse.duckdb` in the command above) — it shares the same connection, so any query you've already run in the CLI is reflected there.
-- Use the schema browser on the left to explore `raw`, `silver`, and `gold` schemas/tables, and the SQL editor pane to run ad-hoc queries with results rendered as a table.
-- Close the UI with `CALL close_ui();`, or just close the CLI session.
+- A primeira chamada baixa a extensão `ui` do repositório de extensões do DuckDB, então é necessário acesso à internet uma vez; depois disso ela fica em cache local e funciona offline.
+- A interface se conecta ao arquivo de banco de dados com o qual você abriu o CLI (`data/warehouse.duckdb` no comando acima) — ela compartilha a mesma conexão, então qualquer query que você já tenha rodado no CLI é refletida ali.
+- Use o navegador de schemas à esquerda para explorar os schemas/tabelas `raw`, `silver` e `gold`, e o painel de editor SQL para rodar queries ad-hoc com os resultados renderizados em tabela.
+- Feche a interface com `CALL close_ui();`, ou simplesmente feche a sessão do CLI.
 
-## Project structure
+## Estrutura do projeto
 
 ```
 .
 ├── airflow/
-│   ├── Dockerfile          # Airflow image with scrapers baked in
+│   ├── Dockerfile          # Imagem do Airflow com os scrapers embutidos
 │   ├── dags/
 │   │   ├── rt_scraper_dag.py
 │   │   ├── mc_scraper_dag.py
 │   │   └── dbt_build_dag.py
 │   └── sql/
 │       └── init_warehouse.sql
-├── cinemetrics/            # dbt project for data transformation
-├── docs/                   # Documentation and practical guides
-├── rottentomatoes_spider/  # Scrapy project for Rotten Tomatoes
-├── mc_scrape/              # Python package for Metacritic
-├── data/                   # Runtime data (gitignored)
+├── cinemetrics/            # Projeto dbt para transformação de dados
+├── docs/                   # Documentação e guias práticos
+├── rottentomatoes_spider/  # Projeto Scrapy para o Rotten Tomatoes
+├── mc_scrape/              # Pacote Python para o Metacritic
+├── data/                   # Dados de runtime (ignorado pelo git)
 │   └── warehouse.duckdb
 └── docker-compose.yml
 ```
 
 ## DAGs
 
-| DAG | Schedule | Description |
+| DAG | Agendamento | Descrição |
 |---|---|---|
-| `rt_scraper` | daily | Discovers movies in theaters, then scrapes score, details, and reviews for each |
-| `mc_scraper` | daily | Browses Metacritic catalog, then scrapes general info and critic/user reviews |
-| `dbt_build`  | daily | Runs dbt tests and builds the silver and gold layers in DuckDB |
+| `rt_scraper` | diário | Descobre filmes em cartaz e, em seguida, coleta nota, detalhes e reviews de cada um |
+| `mc_scraper` | diário | Navega pelo catálogo do Metacritic e, em seguida, coleta informações gerais e reviews de críticos/usuários |
+| `dbt_build`  | diário | Roda os testes do dbt e constrói as camadas silver e gold no DuckDB |
 
-Raw data is loaded into DuckDB under the `raw` schema with three columns: `_loaded_at`, `_source_file`, and `data` (full JSON). Silver and Gold layers are created via dbt.
+Os dados brutos são carregados no DuckDB sob o schema `raw` com três colunas: `_loaded_at`, `_source_file` e `data` (JSON completo). As camadas Silver e Gold são criadas via dbt.

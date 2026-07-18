@@ -1,157 +1,170 @@
 # mc_scrape
 
-Metacritic scraper that fetches general info, critic reviews, and user reviews for movies, writing output as pure JSON consumed by the bronze layer loader. Supports slug discovery via title search or bulk browse across the full catalog (~17k movies).
+Scraper do Metacritic que coleta informações gerais, reviews de críticos e reviews de usuários de filmes, gravando a saída como JSON puro consumido pelo loader da camada bronze. Suporta descoberta de slugs via busca por título ou navegação em massa por todo o catálogo (~17 mil filmes).
 
-## Requirements
+## Requisitos
 
 - Python 3.10+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
-## Setup
+## Configuração
 
 ```bash
-uv sync
+python -m venv .venv
+source .venv/bin/activate   # .venv\Scripts\activate no Windows
+pip install -e .
 ```
 
-## Usage
+## Uso
 
 ### Python
 
-The CLI has three subcommands: `movie`, `search`, and `browse`.
+O CLI tem quatro subcomandos: `movie`, `apikey`, `search` e `browse`.
 
 ---
 
-#### `movie` — scrape a specific movie by slug
+#### `movie` — coleta um filme específico pelo slug
 
 ```bash
-uv run python -m metacritic movie <movie_slug> <action>
+python -m metacritic movie <movie_slug> <action>
 ```
 
-| Argument | Description |
+| Argumento | Descrição |
 |---|---|
-| `movie_slug` | Movie identifier as it appears in the Metacritic URL (e.g. `the-godfather`) |
-| `action` | One of: `general`, `critic_reviews`, `user_reviews`, `all` |
+| `movie_slug` | Identificador do filme como aparece na URL do Metacritic (ex.: `the-godfather`) |
+| `action` | Um de: `general`, `critic_reviews`, `user_reviews`, `all` |
 
 ```bash
-# Fetch general info only
-uv run python -m metacritic movie the-godfather general
+# Busca apenas informações gerais
+python -m metacritic movie the-godfather general
 
-# Fetch all critic reviews (paginated)
-uv run python -m metacritic movie the-godfather critic_reviews
+# Busca todos os reviews de críticos (paginado)
+python -m metacritic movie the-godfather critic_reviews
 
-# Fetch all user reviews (paginated)
-uv run python -m metacritic movie the-godfather user_reviews
+# Busca todos os reviews de usuários (paginado)
+python -m metacritic movie the-godfather user_reviews
 
-# Fetch everything
-uv run python -m metacritic movie the-godfather all
+# Busca tudo
+python -m metacritic movie the-godfather all
 ```
 
 ---
 
-#### `search` — discover slugs by title query
+#### `search` — descobre slugs por título
 
-Searches Metacritic for movies matching a query and writes results to the `browse` JSON output.
+Busca no Metacritic filmes que correspondam a uma query e grava os resultados na saída JSON de `discovered_movies`.
 
 ```bash
-uv run python -m metacritic search "godfather"
+python -m metacritic search "godfather"
 
-# Limit results (useful for testing)
-uv run python -m metacritic search "godfather" --max-items 3
+# Limita os resultados (útil para testes)
+python -m metacritic search "godfather" --max-items 3
 ```
 
 ---
 
-#### `browse` — bulk-discover slugs across the full catalog
+#### `browse` — descoberta em massa de slugs em todo o catálogo
 
-Paginates through all ~17k movies on Metacritic with optional filters. Results are written to the `browse` JSON output.
+Pagina por todos os ~17 mil filmes do Metacritic com filtros opcionais. Os resultados são gravados na saída JSON de `discovered_movies`.
 
 ```bash
-uv run python -m metacritic browse [--sort-by SORT] [--year-min YEAR] [--year-max YEAR] [--genre GENRE ...]
+python -m metacritic browse [--sort-by SORT] [--year-min YEAR] [--year-max YEAR] [--genre GENRE ...]
 ```
 
-| Option | Description | Default |
+| Opção | Descrição | Padrão |
 |---|---|---|
-| `--sort-by` | `'-metaScore'`, `'-userScore'`, or `'-releaseDate'` | `-metaScore` |
-| `--year-min` | Filter to movies released from this year | — |
-| `--year-max` | Filter to movies released up to this year | — |
-| `--genre` | Filter by genre (repeatable) | — |
-| `--max-items` | Maximum number of items to extract (useful for testing and Airflow task generation) | — |
+| `--sort-by` | `'-metaScore'`, `'-userScore'` ou `'-releaseDate'` | `-metaScore` |
+| `--year-min` | Filtra filmes lançados a partir deste ano | — |
+| `--year-max` | Filtra filmes lançados até este ano | — |
+| `--genre` | Filtra por gênero (repetível) | — |
+| `--max-items` | Número máximo de itens a extrair (útil para testes e geração de tasks no Airflow) | — |
 
 ```bash
-# All movies sorted by Metascore
-uv run python -m metacritic browse
+# Todos os filmes ordenados por Metascore
+python -m metacritic browse
 
-# Recent dramas
-uv run python -m metacritic browse --year-min 2020 --genre Drama
+# Dramas recentes
+python -m metacritic browse --year-min 2020 --genre Drama
 
-# Multiple genres
-uv run python -m metacritic browse --genre Action --genre Thriller --sort-by -releaseDate
+# Múltiplos gêneros
+python -m metacritic browse --genre Action --genre Thriller --sort-by -releaseDate
 
-# Test with small sample (first 100 movies)
-uv run python -m metacritic browse --max-items 100
+# Teste com amostra pequena (primeiros 100 filmes)
+python -m metacritic browse --max-items 100
 ```
 
 ---
 
-**Output location:**
+#### `apikey` — busca e imprime a chave de API do Metacritic
 
-By default, JSON files are written to `./data/`:
-
-```
-./data/
-├── mc_general/              (full movie metadata)
-├── mc_critic_reviews/       (individual critic reviews)
-├── mc_user_reviews/         (individual user reviews)
-└── mc_discovered_movies/    (discovered slugs)
-```
-
-The `discovered_movies` file acts as a lightweight "discovered queue" that tracks:
-- `slug` — the movie identifier
-- `discovered_at` — timestamp when discovered
-- `method` — how it was discovered (`browse` or `search`)
-
-For Airflow: use the returned slug list directly for downstream tasks.
-
-Set the `FEED_URI` environment variable to write elsewhere:
+Resolve a chave de API do Metacritic uma única vez e a imprime em stdout (o restante do log vai para stderr). Usado internamente pela DAG `mc_scraper` para obter a chave uma vez e repassá-la a todas as tasks de coleta via `MC_API_KEY`, evitando que ~20 mil coletas de filmes acessem repetidamente a home page (o principal gatilho de bloqueio de bot).
 
 ```bash
-# Write to a custom local path
-FEED_URI=/data/metacritic uv run python -m metacritic movie the-godfather all
-
-# Write to S3
-FEED_URI=s3://my-bucket/metacritic uv run python -m metacritic browse
+python -m metacritic apikey
 ```
 
-## Reading the output with DuckDB
+---
+
+**Local de saída:**
+
+Por padrão, os arquivos JSON são gravados em `./delta/` (controlado pela constante `FEED_URI` em `metacritic/output.py`):
+
+```
+./delta/
+├── general/              (metadados completos do filme)
+├── critic_reviews/       (reviews individuais de críticos)
+├── user_reviews/         (reviews individuais de usuários)
+└── discovered_movies/    (slugs descobertos)
+```
+
+Nota: esses são os nomes reais das subpastas em disco. O prefixo `mc_` (`mc_general`, `mc_critic_reviews`, `mc_user_reviews`) aparece apenas mais tarde, como nome das tabelas `bronze.*` no DuckDB depois que a DAG `mc_scraper` carrega esses arquivos (veja `airflow/dags/mc_scraper_dag.py`) — não é o nome do diretório de saída.
+
+O arquivo `discovered_movies` funciona como uma "fila de descobertas" leve que rastreia:
+- `slug` — o identificador do filme
+- `discovered_at` — timestamp de quando foi descoberto
+- `method` — como foi descoberto (`browse` ou `search`)
+
+Para o Airflow: use a lista de slugs retornada diretamente para as tasks downstream.
+
+Defina a variável de ambiente `FEED_URI` para gravar em outro lugar:
+
+```bash
+# Grava em um caminho local customizado
+FEED_URI=/data/metacritic python -m metacritic movie the-godfather all
+
+# Grava no S3
+FEED_URI=s3://my-bucket/metacritic python -m metacritic browse
+```
+
+## Lendo a saída com DuckDB
 
 ```sql
--- General info
-SELECT * FROM read_json_auto('./data/mc_general/*.json');
+-- Informações gerais
+SELECT * FROM read_json_auto('./delta/general/*.json');
 
--- Critic reviews
-SELECT * FROM read_json_auto('./data/mc_critic_reviews/*.json');
+-- Reviews de críticos
+SELECT * FROM read_json_auto('./delta/critic_reviews/*.json');
 
--- User reviews
-SELECT * FROM read_json_auto('./data/mc_user_reviews/*.json');
+-- Reviews de usuários
+SELECT * FROM read_json_auto('./delta/user_reviews/*.json');
 
--- Discovered movies (slug discovery queue)
-SELECT * FROM read_json_auto('./data/mc_discovered_movies/*.json');
+-- Filmes descobertos (fila de descoberta de slugs)
+SELECT * FROM read_json_auto('./delta/discovered_movies/*.json');
 
--- Example: find all movies discovered via search for "godfather"
+-- Exemplo: encontrar todos os filmes descobertos via busca por "godfather"
 SELECT slug, discovered_at 
-FROM read_json_auto('./data/mc_discovered_movies/*.json')
+FROM read_json_auto('./delta/discovered_movies/*.json')
 WHERE method = 'search';
 ```
 
-From S3:
+A partir do S3 (a saída é JSON simples, não Delta Lake — use `read_json_auto`, não `delta_scan`):
 
 ```sql
-SELECT * FROM delta_scan('s3://my-bucket/metacritic/general');
+SELECT * FROM read_json_auto('s3://my-bucket/metacritic/general/*.json');
 ```
 
-## Finding movie slugs
+## Encontrando slugs de filmes
 
-The slug is the last segment of the Metacritic movie URL:
+O slug é o último segmento da URL do filme no Metacritic:
 
 ```
 https://www.metacritic.com/movie/the-godfather/
@@ -159,12 +172,12 @@ https://www.metacritic.com/movie/the-godfather/
                                   slug: the-godfather
 ```
 
-You can also discover slugs programmatically:
+Você também pode descobrir slugs programaticamente:
 
 ```bash
-# Search by title
-uv run python -m metacritic search "the godfather"
+# Busca por título
+python -m metacritic search "the godfather"
 
-# Browse entire catalog (writes slugs to ./delta/browse)
-uv run python -m metacritic browse
+# Navega por todo o catálogo (grava slugs em ./delta/discovered_movies)
+python -m metacritic browse
 ```

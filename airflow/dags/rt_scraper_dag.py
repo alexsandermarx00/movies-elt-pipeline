@@ -39,33 +39,38 @@ def rt_scraper_dag():
     def resolve_crosswalk() -> None:
         """Translate MC imdb_ids → RT slugs via Wikidata SPARQL (P345→P1258).
 
-        Reads imdb_id from MC general output files, POSTs a batched SPARQL
-        query, and writes data/rt/crosswalk.json with one entry per resolved
-        film. TV-series RT entries (P1258 = 'tv/...') are skipped because
-        rtspider only handles /m/ paths.
+        Reads imdb_id from bronze.mc_general in the warehouse (the accumulated,
+        append-only record of every MC movie loaded so far — not the
+        data/mc/general/ staging dir, which mc_scraper's load_raw_to_duckdb
+        empties into data/mc/.loaded/general/ right before this task runs),
+        POSTs a batched SPARQL query, and writes data/rt/crosswalk.json with
+        one entry per resolved film. TV-series RT entries (P1258 = 'tv/...')
+        are skipped because rtspider only handles /m/ paths.
         """
         import os
         import requests
+        import duckdb
 
-        # Collect imdb_id + mc_slug + title from MC general output files.
-        # Each file is a JSON array of GeneralItem objects.
+        # Collect imdb_id + mc_slug + title from every MC general record loaded
+        # into bronze so far (across all runs), not just files from this run.
         mc_movies: dict[str, dict] = {}
-        for fp in glob.glob(f"{_DATA}/mc/general/*.json"):
-            try:
-                with open(fp) as f:
-                    items = json.load(f)
-                if isinstance(items, dict):
-                    items = [items]
-                for item in items:
-                    imdb_id = item.get("imdb_id")
-                    mc_slug = item.get("movie_slug") or item.get("slug")
-                    if imdb_id and mc_slug and imdb_id not in mc_movies:
-                        mc_movies[imdb_id] = {
-                            "mc_slug": mc_slug,
-                            "title": item.get("title"),
-                        }
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"Skipping {fp}: {e}")
+        con = duckdb.connect(_WAREHOUSE, read_only=True)
+        try:
+            rows = con.execute("SELECT data FROM bronze.mc_general").fetchall()
+        finally:
+            con.close()
+        for (raw,) in rows:
+            items = json.loads(raw)
+            if isinstance(items, dict):
+                items = [items]
+            for item in items:
+                imdb_id = item.get("imdb_id")
+                mc_slug = item.get("movie_slug") or item.get("slug")
+                if imdb_id and mc_slug and imdb_id not in mc_movies:
+                    mc_movies[imdb_id] = {
+                        "mc_slug": mc_slug,
+                        "title": item.get("title"),
+                    }
 
         os.makedirs(f"{_DATA}/rt", exist_ok=True)
 
@@ -155,6 +160,9 @@ SELECT ?imdb ?rt WHERE {{
 
     @task(outlets=[RT_RAW_ASSET], pool="duckdb")
     def load_all_raw_to_duckdb() -> None:
+        import shutil
+        from pathlib import Path
+
         import duckdb
 
         con = duckdb.connect(_WAREHOUSE)
@@ -190,6 +198,8 @@ SELECT ?imdb ?rt WHERE {{
                     data JSON
                 )
             """)
+            loaded_dir = Path(_DATA) / "rt" / ".loaded" / action
+            loaded_dir.mkdir(parents=True, exist_ok=True)
             for fp in glob.glob(f"{_DATA}/rt/{action}/*.json"):
                 with open(fp, errors="replace") as f:
                     raw = f.read()
@@ -203,6 +213,8 @@ SELECT ?imdb ?rt WHERE {{
                     "VALUES (current_timestamp, ?, ?)",
                     [fp, content],
                 )
+                # Move out of the glob path so the next run doesn't reload it.
+                shutil.move(fp, loaded_dir / Path(fp).name)
 
         con.close()
 
@@ -217,7 +229,11 @@ SELECT ?imdb ?rt WHERE {{
             task_id=f"scrape_{action}",
             cwd=_SCRAPERS,
             env={
-                "FEED_URI": f"{_DATA}/rt/{action}/%(name)s_%(time)s.json",
+                # One feed file per movie (%(movie)s resolved via the spider's
+                # FEED_URI_PARAMS). The old %(name)s_%(time)s pattern collided
+                # whenever two crawls finished in the same second, silently
+                # dropping ~18% of scraped movies before load.
+                "FEED_URI": f"{_DATA}/rt/{action}/%(movie)s.json",
                 "RT_DONE_DIR": f"{_DATA}/rt/.done",
                 **_RT_RATE_ENV,
             },

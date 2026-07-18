@@ -105,8 +105,18 @@ import os
 FEED_EXPORT_ENCODING = "utf-8"
 # LOG_FILE = "scrapy.log"
 
-# Persistent Output Pipeline (S3, GCS, Local)
-FEED_URI = os.environ.get('FEED_URI', '.output/%(action)s/%(name)s_%(time)s.json')
+
+def feed_uri_params(params, spider):
+    """Expose per-crawl values so FEED_URI can key output by movie and action.
+    """
+    params["movie"] = getattr(spider, "movie_id", "unknown")
+    params["action"] = getattr(spider, "action", "unknown")
+    return params
+
+
+FEED_URI_PARAMS = feed_uri_params
+
+FEED_URI = os.environ.get('FEED_URI', '.output/%(action)s/%(movie)s.json')
 FEEDS = {
     FEED_URI: {
         'format': 'json',

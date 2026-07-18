@@ -1,4 +1,4 @@
-# Gold Layer — Entity-Relationship Diagram
+# Camada Gold — Diagrama Entidade-Relacionamento
 
 ```mermaid
 erDiagram
@@ -64,9 +64,9 @@ erDiagram
     dim_date        ||--o{ fact_critic_review : "date_key"
 ```
 
-## Notes
+## Observações
 
-- `platform` is either `'metacritic'` or `'rottentomatoes'` in both fact tables.
-- `mc_slug` and `rt_movie_id` in `dim_movie` may be NULL for single-source movies (FULL OUTER JOIN between platforms).
-- `movie_key`, `critic_key`, and `date_key` FKs in `fact_critic_review` are nullable — unresolvable references produce NULL rather than dropped rows.
-- MC user scores are normalised from the 0–10 raw scale to 0–100 (`× 10`). RT audience score is derived from `likedCount / (likedCount + notLikedCount)`.
+- `platform` é `'metacritic'` ou `'rottentomatoes'` em ambas as tabelas fato.
+- `mc_slug` e `rt_movie_id` em `dim_movie` podem ser NULL para filmes de fonte única (FULL OUTER JOIN entre plataformas).
+- As FKs `movie_key`, `critic_key` e `date_key` em `fact_critic_review` são anuláveis — referências não resolvidas geram NULL em vez de descartar a linha.
+- As notas de usuário do MC são normalizadas da escala bruta 0–10 para 0–100 (`× 10`). A nota do público do RT é derivada de `likedCount / (likedCount + notLikedCount)`.

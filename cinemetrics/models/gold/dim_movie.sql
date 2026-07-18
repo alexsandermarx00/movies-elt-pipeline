@@ -8,6 +8,8 @@ with mc as (
         imdb_id,
         json_extract_string(genres, '$[0]')                 as primary_genre
     from {{ ref('silver_mc_general') }}
+    qualify imdb_id is null
+        or row_number() over (partition by imdb_id order by _loaded_at desc) = 1
 ),
 rt as (
     select
@@ -17,6 +19,8 @@ rt as (
         urlid                                               as rt_urlid,
         imdb_id
     from {{ ref('silver_rt_details') }}
+    qualify imdb_id is null
+        or row_number() over (partition by imdb_id order by _loaded_at desc) = 1
 ),
 joined as (
     select

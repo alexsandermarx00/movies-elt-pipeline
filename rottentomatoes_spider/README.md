@@ -1,80 +1,80 @@
 # Rotten Tomatoes Spider
 
-A Scrapy spider for extracting comprehensive data from Rotten Tomatoes.
+Um spider Scrapy para extrair dados abrangentes do Rotten Tomatoes.
 
-## Installation
+## Instalação
 
-Ensure you have installed the required dependencies from the `requirements.txt` file before running the spider.
+Certifique-se de ter instalado as dependências necessárias a partir do arquivo `requirements.txt` antes de rodar o spider.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## Uso
 
-This project contains a primary spider named `rtspider`. You can pass parameters dynamically via the command line to tell it which movie you are scraping, and what type of data you want to extract.
+Este projeto contém um spider principal chamado `rtspider`. Você pode passar parâmetros dinamicamente pela linha de comando para indicar qual filme está sendo coletado e qual tipo de dado deseja extrair.
 
-### General Syntax
+### Sintaxe geral
 
 ```bash
 scrapy crawl rtspider -a movie=<movie_name_slug> -a action=<extraction_mode> [options]
 ```
 
-- `movie`: The URL slug of the movie on Rotten Tomatoes. (e.g. `godzilla_x_kong_the_new_empire`, `dune_part_two`)
-- `action`: The extraction mode you want to execute (`score`, `reviews`, or `details`).
-- `max_pages`: *(Optional)* Defines the maximum number of paginated pages to scrape when using `reviews` action (defaults to `2`).
-- `-o`: *(Optional)* Manual local output override. Note: standard execution will automatically dispatch output to the `.output/` directory natively, or to an S3 object instance if the `FEED_URI` environment variable is engaged.
+- `movie`: O slug da URL do filme no Rotten Tomatoes. (ex.: `godzilla_x_kong_the_new_empire`, `dune_part_two`)
+- `action`: O modo de extração a ser executado (`score`, `reviews` ou `details`).
+- `max_pages`: *(Opcional)* Define o número máximo de páginas paginadas a coletar ao usar a action `reviews` (padrão: `2`).
+- `-o`: *(Opcional)* Override manual de saída local. Nota: a execução padrão despacha automaticamente a saída para o diretório `.output/`, ou para uma instância de objeto S3 se a variável de ambiente `FEED_URI` estiver definida.
 
 ---
 
-## Extraction Modes (`action`)
+## Modos de extração (`action`)
 
-The spider supports four distinct modes of data extraction.
+O spider suporta quatro modos distintos de extração de dados.
 
 ### 1. `score`
-Pulls high-level rating and synopsis information.
-**Extracted Data:** Movie ID, overall/verified audience score, overall/top critics score, and description. 
+Extrai informações de nota geral e sinopse.
+**Dados extraídos:** ID do filme, nota geral/verificada do público, nota geral/dos principais críticos, e descrição. 
 
-**Execution Example:**
+**Exemplo de execução:**
 ```bash
 scrapy crawl rtspider -a movie=dune_part_two -a action=score
 ```
 
 ### 2. `reviews`
-Pulls and paginates through the user reviews for the specified movie.
-**Extracted Data:** Movie ID, review rating, quote, review ID, verified status, profanity/spoiler flags, user details, and creation date.
+Extrai e pagina pelos reviews de usuários do filme especificado.
+**Dados extraídos:** ID do filme, nota do review, citação, ID do review, status de verificação, flags de palavrão/spoiler, detalhes do usuário e data de criação.
 
-**Execution Example:**
+**Exemplo de execução:**
 ```bash
 scrapy crawl rtspider -a movie=dune_part_two -a action=reviews -a max_pages=5
 ```
 
 ### 3. `details`
-Pulls technical details from the underlying page metadata integration.
-**Extracted Data:** Movie ID, title, film rating (e.g. PG-13), release date, and internal IDs (`rtid`, `urlid`).
+Extrai detalhes técnicos a partir da integração de metadados da página.
+**Dados extraídos:** ID do filme, título, classificação indicativa (ex.: PG-13), data de lançamento e IDs internos (`rtid`, `urlid`).
 
-**Execution Example:**
+**Exemplo de execução:**
 ```bash
 scrapy crawl rtspider -a movie=dune_part_two -a action=details
 ```
 
 ### 4. `critic_reviews`
-Pulls and paginates through critic reviews for the specified movie.
-**Extracted Data:** Movie ID, review ID, critic name, publication, score, quote, review date.
+Extrai e pagina pelos reviews de críticos do filme especificado.
+**Dados extraídos:** ID do filme, ID do review, nome do crítico, veículo, nota, citação, data do review.
 
-**Execution Example:**
+**Exemplo de execução:**
 ```bash
 scrapy crawl rtspider -a movie=dune_part_two -a action=critic_reviews -a max_pages=5
 ```
 
 ---
 
-## Discovery via Wikidata Crosswalk
+## Descoberta via crosswalk do Wikidata
 
-Previously, this project included `rt_discovery_spider.py` for dynamic movie discovery. This has been replaced by a Wikidata crosswalk mapping (IMDB ID → RT URL Slug), bridging records directly and deterministically into our pipeline without requiring exploratory scraping.
+Anteriormente, este projeto incluía o `rt_discovery_spider.py` para descoberta dinâmica de filmes. Isso foi substituído por um mapeamento crosswalk do Wikidata (ID do IMDB → slug de URL do RT), conectando registros direta e deterministicamente ao nosso pipeline sem exigir coleta exploratória.
 
 ---
 
-## Orchestration
+## Orquestração
 
-The scraper is executed via Apache Airflow. The Dockerfile for execution is located in the root `airflow/` directory. Airflow runs the scrapers as subprocesses (using BashOperator), writing the output as JSON files which are then loaded into DuckDB.
+O scraper é executado via Apache Airflow. O Dockerfile de execução está localizado no diretório raiz `airflow/`. O Airflow executa os scrapers como subprocessos (usando BashOperator), gravando a saída como arquivos JSON que são então carregados no DuckDB.

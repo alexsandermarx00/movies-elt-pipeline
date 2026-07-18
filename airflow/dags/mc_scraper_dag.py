@@ -14,7 +14,6 @@ from _assets import MC_RAW_ASSET
 _DATA = "/opt/airflow/data"
 _MC_FEED = f"{_DATA}/mc"
 _WAREHOUSE = f"{_DATA}/warehouse.duckdb"
-_MC_RAW_SUBDIRS = ["discovered_movies", "general", "critic_reviews", "user_reviews", ".done"]
 
 # Rate/politeness knobs sourced from Airflow Variables (Admin > Variables in the
 # UI) so they can be changed live without recreating containers. Templated into
@@ -47,11 +46,16 @@ def mc_scraper_dag():
     def clean_raw_feed() -> None:
         import shutil
 
-        for subdir in _MC_RAW_SUBDIRS:
-            d = Path(_MC_FEED) / subdir
-            if d.exists():
-                shutil.rmtree(d)
-            d.mkdir(parents=True, exist_ok=True)
+        # Only discovered_movies is reset: it's fully recomputed by
+        # discover_movies every run, so stale listings would just accumulate.
+        # general/critic_reviews/user_reviews/.done must survive across runs —
+        # bronze loads are append-only (see load_raw_to_duckdb) and .done
+        # markers are what let a retried/re-triggered run resume instead of
+        # rescraping everything from scratch.
+        d = Path(_MC_FEED) / "discovered_movies"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True, exist_ok=True)
 
     # Resolve the Metacritic API key ONCE, then hand it to every downstream task
     # via MC_API_KEY. get_api_key() short-circuits on that env var, so the ~20k
@@ -126,6 +130,8 @@ def mc_scraper_dag():
 
     @task(outlets=[MC_RAW_ASSET], pool="duckdb")
     def load_raw_to_duckdb() -> None:
+        import shutil
+
         import duckdb
 
         con = duckdb.connect(_WAREHOUSE)
@@ -143,9 +149,11 @@ def mc_scraper_dag():
                     data JSON
                 )
             """)
-            # Full-snapshot load: clear the table so re-runs don't accumulate
-            # duplicate copies of every file (bronze stays 1x the files on disk).
-            con.execute(f"TRUNCATE bronze.{table}")
+            # Append-only: bronze accumulates across runs so a later run (e.g.
+            # a different year range) doesn't erase an earlier one. Duplicates
+            # across runs are fine — silver dedupes on (key, _loaded_at desc).
+            loaded_dir = Path(_MC_FEED) / ".loaded" / subdir
+            loaded_dir.mkdir(parents=True, exist_ok=True)
             for fp in glob.glob(f"{_MC_FEED}/{subdir}/*.json"):
                 with open(fp, errors="replace") as f:
                     raw = f.read()
@@ -158,6 +166,8 @@ def mc_scraper_dag():
                     f"INSERT INTO bronze.{table} (_loaded_at, _source_file, data) VALUES (current_timestamp, ?, ?)",
                     [fp, content],
                 )
+                # Move out of the glob path so the next run doesn't reload it.
+                shutil.move(fp, loaded_dir / Path(fp).name)
 
         con.close()
 

@@ -1,15 +1,15 @@
-Welcome to your new dbt project!
+Bem-vindo ao seu novo projeto dbt!
 
-### Using the starter project
+### Usando o projeto inicial
 
-Try running the following commands:
+Tente rodar os seguintes comandos:
 - dbt run
 - dbt test
 
 
-### Resources:
-- Learn more about dbt [in the docs](https://docs.getdbt.com/docs/introduction)
-- Check out [Discourse](https://discourse.getdbt.com/) for commonly asked questions and answers
-- Join the [chat](https://community.getdbt.com/) on Slack for live discussions and support
-- Find [dbt events](https://events.getdbt.com) near you
-- Check out [the blog](https://blog.getdbt.com/) for the latest news on dbt's development and best practices
+### Recursos:
+- Saiba mais sobre o dbt [na documentação](https://docs.getdbt.com/docs/introduction)
+- Confira o [Discourse](https://discourse.getdbt.com/) para perguntas e respostas comuns
+- Junte-se ao [chat](https://community.getdbt.com/) no Slack para discussões e suporte ao vivo
+- Encontre [eventos do dbt](https://events.getdbt.com) perto de você
+- Confira [o blog](https://blog.getdbt.com/) para as últimas novidades sobre o desenvolvimento do dbt e boas práticas
